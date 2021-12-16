@@ -1,0 +1,10 @@
+{
+  "env_name": "InvertedPendulum-v2",
+  "trainer": {
+    "max_epoch": 15,
+    "rollout_step_scheduler":{
+      "initial_val": 1,
+      "schedule_type": "identical"
+    }
+  }
+}
