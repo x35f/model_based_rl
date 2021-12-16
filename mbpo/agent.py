@@ -78,15 +78,11 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
     def train_model(self, data_batch):
         #compute the number of holdout samples
         batch_size = data_batch['obs'].shape[0]
-        assert(batch_size == 100)
         num_holdout = int(batch_size * self.holdout_ratio)
 
         #permutate samples
-        permutation = np.random.permutation(batch_size)
         obs_batch, action_batch, next_obs_batch, reward_batch, done_batch = \
             itemgetter("obs",'action','next_obs', 'reward', 'done')(data_batch)
-        obs_batch, action_batch, next_obs_batch, reward_batch = \
-            obs_batch[permutation], action_batch[permutation], next_obs_batch[permutation], reward_batch[permutation]
 
         #divide samples into training samples and testing samples
         train_obs_batch, train_action_batch, train_next_obs_batch, train_reward_batch = \
@@ -115,8 +111,8 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             self.transition_model.elite_model_idxes = idx[:self.transition_model.num_elite]
         
         return {
-            "train_transition_loss": train_loss,
-            "test_transition_loss": test_loss
+            "loss/train_transition_loss": train_loss,
+            "loss/test_transition_loss": test_loss
         }
 
     def model_loss(self, predictions, trues):
