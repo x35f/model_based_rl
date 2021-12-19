@@ -1,0 +1,16 @@
+{
+  "env_name": "Walker2d-v3",
+  "trainer": {
+    "max_epoch": 12500,
+    "rollout_step_scheduler":{
+      "initial_val": 1,
+      "target_val": 1,
+      "start_timestep": 20,
+      "end_timestep": 100,
+      "schedule_type": "identical"
+    },
+    "model_env_ratio": 0.0,
+    "num_agent_updates_per_env_step": 1,
+    "test_interval": 3
+  }
+}

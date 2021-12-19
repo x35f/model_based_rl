@@ -3,7 +3,6 @@ import torch.nn.functional as F
 import os
 from unstable_baselines.common.agents import BaseAgent
 from unstable_baselines.common.networks import MLPNetwork, PolicyNetworkFactory, get_optimizer
-from unstable_baselines.common.models import EnsembleModel, EnvPredictor
 import numpy as np
 from unstable_baselines.common import util 
 from operator import itemgetter
@@ -19,17 +18,12 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         #save parameters
         self.args = kwargs
 
-        # get per flag
-        self.per = self.args.get('per', False)
-
         #initilze networks
         self.q1_network = MLPNetwork(obs_dim + action_dim, 1, **kwargs['q_network'])
         self.q2_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
         self.target_q1_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
         self.target_q2_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
         self.policy_network = PolicyNetworkFactory.get(obs_dim, action_space,  ** kwargs['policy_network'])
-        self.transition_model = EnsembleModel(obs_dim, action_dim, **kwargs['transition_model'])
-
         
         #sync network parameters
         util.soft_update_network(self.q1_network, self.target_q1_network, 1.0)
@@ -41,7 +35,6 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         self.target_q1_network = self.target_q1_network.to(util.device)
         self.target_q2_network = self.target_q2_network.to(util.device)
         self.policy_network = self.policy_network.to(util.device)
-        self.transition_model = self.transition_model.to(util.device)
         
         self.networks = {
             "q1": self.q1_network,
@@ -49,17 +42,12 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             "target_q1": self.target_q1_network,
             "target_q2": self.target_q2_network,
             "policy": self.policy_network,
-            "transition_model": self.transition_model
         }
 
         #initialize optimizer
         self.q1_optimizer = get_optimizer(network = self.q1_network, **kwargs['q_network'])
         self.q2_optimizer = get_optimizer(network = self.q2_network, **kwargs['q_network'])
         self.policy_optimizer = get_optimizer(network = self.policy_network, **kwargs['policy_network'])
-        self.transition_optimizer = get_optimizer(network = self.transition_model, **kwargs['transition_model'])
-
-        #initialize predict env
-        self.env_predctor = EnvPredictor(self.transition_model, env_name=env_name)
 
         #hyper-parameters
         self.gamma = kwargs['gamma']
@@ -71,60 +59,6 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=kwargs['entropy']['learning_rate'])
         self.tot_update_count = 0 
         self.target_smoothing_tau = target_smoothing_tau
-        self.holdout_ratio = kwargs['transition_model']['holdout_ratio']
-        self.inc_var_loss = kwargs['transition_model']['inc_var_loss']
-
-
-    def train_model(self, data_batch):
-        #compute the number of holdout samples
-        batch_size = data_batch['obs'].shape[0]
-        num_holdout = int(batch_size * self.holdout_ratio)
-
-        #permutate samples
-        obs_batch, action_batch, next_obs_batch, reward_batch, done_batch = \
-            itemgetter("obs",'action','next_obs', 'reward', 'done')(data_batch)
-
-        #divide samples into training samples and testing samples
-        train_obs_batch, train_action_batch, train_next_obs_batch, train_reward_batch = \
-            obs_batch[num_holdout:], action_batch[num_holdout:], next_obs_batch[num_holdout:], reward_batch[num_holdout:]
-        test_obs_batch, test_action_batch, test_next_obs_batch, test_reward_batch = \
-            obs_batch[:num_holdout], action_batch[:num_holdout], next_obs_batch[:num_holdout], reward_batch[:num_holdout]
-
-        #predict with model
-        predictions = self.transition_model.predict(train_obs_batch, train_action_batch)
-        
-        #compute training loss
-        obs_reward = torch.cat((train_next_obs_batch - train_obs_batch, train_reward_batch), dim=1)
-        train_loss = sum(self.model_loss(predictions, obs_reward))
-        
-        #back propogate
-        self.transition_optimizer.zero_grad()
-        train_loss.backward()
-        self.transition_optimizer.step()
-
-        #compute testing loss
-        with torch.no_grad():
-            test_predictions = self.transition_model.predict(test_obs_batch, test_action_batch)
-            test_obs_reward = torch.cat((test_next_obs_batch - test_obs_batch, test_reward_batch), dim=1)
-            test_loss = sum(self.model_loss(test_predictions, test_obs_reward))
-            idx = np.argsort(test_loss.detach().cpu())
-            self.transition_model.elite_model_idxes = idx[:self.transition_model.num_elite]
-        
-        return {
-            "loss/train_transition_loss": train_loss,
-            "loss/test_transition_loss": test_loss
-        }
-
-    def model_loss(self, predictions, trues):
-        loss = []
-        for (means, vars) in predictions:
-            if self.inc_var_loss:
-                mean_loss = torch.mean(torch.mean(torch.pow(means - trues, 2) * (1/vars), dim=-1), dim=-1)
-                var_loss = torch.mean(torch.mean(torch.log(vars), dim=-1), dim=-1)
-                loss.append(mean_loss + var_loss)
-            else:
-                loss.append(torch.mean(torch.mean(torch.pow(means - trues, 2), dim=-1), dim=-1))
-        return loss
 
 
     def update(self, data_batch):
@@ -199,9 +133,15 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             "loss/q2": q2_loss_value, 
             "loss/policy": policy_loss_value, 
             "loss/entropy": alpha_loss_value, 
-            "others/entropy_alpha": alpha_value, 
-            "misc/current_state_q1_value": torch.norm(curr_state_q1_value.squeeze().detach().clone().cpu(), p=1) / len(curr_state_q1_value.squeeze()), 
-            "misc/current_state_q2_value": torch.norm(curr_state_q2_value.squeeze().detach().clone().cpu(), p=1) / len(curr_state_q2_value.squeeze()),
+            "stats/entropy_alpha": alpha_value, 
+            "misc/obs_mean": torch.mean(obs_batch).item(),
+            "misc/obs_var": torch.var(obs_batch).item(),
+            "misc/current_state_q1_mean": torch.mean(curr_state_q1_value).item(), 
+            "misc/current_state_q2_mean": torch.mean(curr_state_q2_value).item(),
+            "misc/train_reward_mean": torch.mean(reward_batch).item(),
+            "misc/current_state_q1_var": torch.var(curr_state_q1_value).item(), 
+            "misc/current_state_q2_var": torch.var(curr_state_q2_value).item(),
+            "misc/train_reward_var": torch.var(reward_batch).item(),
             "misc/q_diff": torch.norm((curr_state_q2_value-curr_state_q1_value).squeeze().detach().clone().cpu(), p=1) / len(curr_state_q1_value.squeeze())
         }
         
@@ -225,31 +165,7 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         return action_scaled.detach().cpu().numpy(), log_prob.detach().cpu().numpy()
 
 
-    def rollout(self, obs_batch, model_rollout_steps):
-        obs_list = np.array([])
-        action_list = np.array([])
-        next_obs_list = np.array([])
-        reward_list = np.array([])
-        done_list = np.array([])
-        obs = obs_batch.detach().cpu().numpy()
-        for step in range(model_rollout_steps):
-            action, log_prob = self.select_action(obs)
-            next_obs, reward, done, info = self.env_predctor.predict(obs, action)
-            if step == 0:
-                obs_list = obs
-                action_list = action
-                next_obs_list = next_obs
-                reward_list = reward
-                done_list = done
-            else:
-                obs_list = np.concatenate((obs_list, obs), 0)
-                action_list = np.concatenate((action_list, action), 0)
-                next_obs_list = np.concatenate((next_obs_list, next_obs), 0)
-                reward_list = np.concatenate((reward_list, reward), 0)
-                done_list = np.concatenate((done_list, done), 0)
-            obs = np.array([obs_pred for obs_pred, done_pred in zip(next_obs_list, done_list) if not done_pred[0]])
-        #assert(obs_list.shape[1] == 11)
-        return {'obs_list': obs_list, 'action_list': action_list, 'reward_list': reward_list, 'next_obs_list': next_obs_list, 'done_list': done_list}
+    
 
         
 
