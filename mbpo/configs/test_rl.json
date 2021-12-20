@@ -1,5 +1,5 @@
 {
-  "env_name": "Walker2d-v3",
+  "env_name": "Hopper-v2",
   "trainer": {
     "max_epoch": 12500,
     "rollout_step_scheduler":{
@@ -10,7 +10,7 @@
       "schedule_type": "identical"
     },
     "model_env_ratio": 0.0,
-    "num_agent_updates_per_env_step": 1,
+    "num_agent_updates_per_env_step": 20,
     "test_interval": 3
   }
 }

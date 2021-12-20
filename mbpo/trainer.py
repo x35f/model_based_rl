@@ -8,8 +8,7 @@ from tqdm import  trange
 import torch
 import random
 from unstable_baselines.common import util
-from unstable_baselines.common.scheduler import Scheduler
-
+from unstable_baselines.common.buffer import ReplayBuffer
 class MBPOTrainer(BaseTrainer):
     def __init__(self, agent, env, eval_env, transition_model, env_buffer, model_buffer, rollout_step_generator,
             agent_batch_size=100,
@@ -76,16 +75,21 @@ class MBPOTrainer(BaseTrainer):
         done = False
         obs = self.env.reset()
         tot_agent_update_steps = 0
+        model_rollout_steps = 1
         model_loss_dict = {}
         loss_dict = {}
-        for epoch in trange(self.max_epoch, colour='red', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
+        for epoch in trange(self.max_epoch, colour='blue', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
             
             epoch_start_time = time()
+            prev_model_rollout_steps = model_rollout_steps
             model_rollout_steps = int(self.rollout_step_generator.next())
+            if prev_model_rollout_steps != model_rollout_steps:
+                self.resize_model_buffer(model_rollout_steps)
+                util.logger.log_var("misc/model_buffer_size", model_rollout_steps, self.tot_env_steps)
 
             #train model on env_buffer via maximum likelihood
             #for e steps do
-            for env_step in trange(self.num_env_steps_per_epoch, colour='red', desc='inner loop'):
+            for env_step in trange(self.num_env_steps_per_epoch, colour='green', desc='inner loop'):
                 #take action in environment according to \pi, add to D_env
                 action, _ = self.agent.select_action(obs)
                 next_obs, reward, done, _ = self.env.step(action)
@@ -118,15 +122,13 @@ class MBPOTrainer(BaseTrainer):
                     util.logger.log_var(loss_name, model_loss_dict[loss_name], self.tot_env_steps) 
 
                 train_agent_start_time = time()
-                #for G gradient updates do
+                #train agent
                 for agent_update_step in range(self.num_agent_updates_per_env_step) :
                     if tot_agent_update_steps > self.tot_env_steps * self.max_agent_updates_per_env_step:
                         break
-                    model_data_batch = self.model_buffer.sample_batch(int(self.agent_batch_size * self.model_env_ratio))
-                    env_data_batch = self.env_buffer.sample_batch(int(self.agent_batch_size * (1.0 - self.model_env_ratio)))
-                    data_batch = self.merge_data_batch(model_data_batch, env_data_batch)
-                    loss_dict = self.agent.update(data_batch)
+                    loss_dict = self.train_agent()
                     tot_agent_update_steps += 1
+
                 train_agent_used_time =  time() - train_agent_start_time
                 util.logger.log_var("times/train_agent", train_agent_used_time, self.tot_env_steps)
                        
@@ -174,7 +176,6 @@ class MBPOTrainer(BaseTrainer):
         return data1_dict
 
     def train_model(self):
-        train_model_start_time = time()
         data_indices = list(range(self.env_buffer.max_sample_size))
         random.shuffle(data_indices)
         num_batches = int(np.ceil(self.env_buffer.max_sample_size / self.model_batch_size))
@@ -182,9 +183,16 @@ class MBPOTrainer(BaseTrainer):
             batch_indices = data_indices[model_train_step * self.model_batch_size: min(len (data_indices), (model_train_step + 1) * self.model_batch_size)]
             data_batch = self.env_buffer.get_batch(batch_indices)
             model_loss_dict = self.transition_model.update(data_batch)
-        train_model_used_time = time() - train_model_start_time
         #print("\033[32menv\033[0m", data_batch['done'].shape, data_batch['done'][:min(3, len(data_batch['done']))])
         return model_loss_dict
+
+    def resize_model_buffer(self, rollout_length):
+        rollouts_per_epoch = self.rollout_batch_size * self.num_env_steps_per_epoch / self.train_model_interval
+        new_model_buffer_size = int(rollout_length * rollouts_per_epoch)
+
+        previous_transitions = self.model_buffer.sample_batch(self.model_buffer.max_sample_size)
+        self.model_buffer = ReplayBuffer( self.model_buffer.obs_space,  self.model_buffer.action_space, max_buffer_size = new_model_buffer_size)
+        self.model_buffer.add_traj(**previous_transitions)
 
 
     def rollout_model(self, model_rollout_steps):
@@ -201,9 +209,7 @@ class MBPOTrainer(BaseTrainer):
                 action_minibatch, _ = self.agent.select_action(obs_minibatch)
                 next_obs_minibatch, reward_minibatch, done_minibatch, info = self.transition_model.predict(obs_minibatch, action_minibatch)
                 done_minibatch = [float(d) for d in done_minibatch]
-                #print("\033[31mrollout\033[0m", done_minibatch.shape, done_minibatch[:min(3, len(done_minibatch))])
                 self.model_buffer.add_traj(obs_minibatch, action_minibatch, next_obs_minibatch, reward_minibatch, done_minibatch)
-                #print(obs_minibatch.shape, action_minibatch.shape, next_obs_minibatch.shape, reward_minibatch.shape, done_minibatch.shape)
                 obs_minibatch = np.array([obs_pred for obs_pred, done_pred in zip(next_obs_minibatch, done_minibatch) if not done_pred])
                 if len(obs_minibatch) == 0:
                     break
@@ -213,7 +219,13 @@ class MBPOTrainer(BaseTrainer):
         util.logger.log_var("misc/env_obs_var", np.var(obs_batch), self.tot_env_steps)
         util.logger.log_var("misc/env_next_obs_mean", np.mean(next_obs_batch), self.tot_env_steps)
         util.logger.log_var("misc/env_next_obs_var", np.var(next_obs_batch), self.tot_env_steps)
-
+    
+    def train_agent(self):
+        model_data_batch = self.model_buffer.sample_batch(int(self.agent_batch_size * self.model_env_ratio))
+        env_data_batch = self.env_buffer.sample_batch(int(self.agent_batch_size * (1.0 - self.model_env_ratio)))
+        data_batch = self.merge_data_batch(model_data_batch, env_data_batch)
+        loss_dict = self.agent.update(data_batch)
+        return loss_dict
 
             
 
