@@ -10,7 +10,7 @@ from unstable_baselines.model_based_rl.mbpo.agent import MBPOAgent
 from unstable_baselines.common.util import set_device_and_logger, load_config, set_global_seed
 from unstable_baselines.common.buffer import ReplayBuffer
 from unstable_baselines.common.env_wrapper import get_env, BaseEnvWrapper
-from unstable_baselines.model_based_rl.common.transition_model import TransitionModel
+from unstable_baselines.model_based_rl.mbpo.transition_model import TransitionModel
 from unstable_baselines.common.scheduler import Scheduler
 from unstable_baselines.common import util
 

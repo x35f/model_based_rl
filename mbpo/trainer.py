@@ -15,6 +15,7 @@ class MBPOTrainer(BaseTrainer):
             model_batch_size=256,
             rollout_batch_size=100000,
             rollout_mini_batch_size=1000,
+            model_retain_epochs=1,
             num_env_steps_per_epoch=1000,
             train_model_interval=250,
             train_agent_interval=1,
@@ -26,7 +27,8 @@ class MBPOTrainer(BaseTrainer):
             max_epoch=100000,
             save_model_interval=10000,
             max_agent_updates_per_env_step=5,
-            start_timestep=5000,
+            start_train_model_timestep=5000,
+            start_train_agent_timestep = 10000,
             save_video_demo_interval=10000,
             log_interval=100,
             model_env_ratio=0.8,
@@ -46,6 +48,7 @@ class MBPOTrainer(BaseTrainer):
         self.model_batch_size = model_batch_size
         self.rollout_batch_size = rollout_batch_size
         self.rollout_mini_batch_size = rollout_mini_batch_size
+        self.model_retain_epochs = model_retain_epochs
         self.num_env_steps_per_epoch = num_env_steps_per_epoch
         self.train_agent_interval = train_agent_interval
         self.train_model_interval = train_model_interval
@@ -57,19 +60,29 @@ class MBPOTrainer(BaseTrainer):
         self.max_epoch = max_epoch
         self.save_model_interval = save_model_interval
         self.save_video_demo_interval = save_video_demo_interval
-        self.start_timestep = start_timestep
+        self.start_train_model_timestep = start_train_model_timestep
+        self.start_train_agent_timestep = start_train_agent_timestep
         self.log_interval = log_interval
         self.model_env_ratio = model_env_ratio
         self.train_log_interval = train_log_interval
         if load_dir != "" and os.path.exists(load_dir):
             self.agent.load(load_dir)
 
+    def warmup(self):
+        obs = self.env.reset()
+        for step in tqdm(range(self.start_train_model_timestep)):
+            action, _ = self.agent.select_action(obs)
+            next_obs, reward, done, info = self.env.step(action)
+            self.env_buffer.add_tuple(obs, action, next_obs, reward, float(done))
+            obs = next_obs
+            if done:
+                obs = self.env.reset()
+
+
     def train(self):
         train_traj_returns = [0]
         train_traj_lengths = [0]
         epoch_durations = []
-        self.tot_env_steps = 0
-        obs = self.env.reset()
         traj_return = 0
         traj_length = 0
         done = False
@@ -78,6 +91,12 @@ class MBPOTrainer(BaseTrainer):
         model_rollout_steps = 1
         model_loss_dict = {}
         loss_dict = {}
+        util.logger.log_str("Warming Up")
+        self.warmup()
+        self.tot_env_steps = self.start_train_model_timestep
+        obs = self.env.reset()
+
+        util.logger.log_str("Started Tr")
         for epoch in trange(self.max_epoch, colour='blue', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
             
             epoch_start_time = time()
@@ -108,8 +127,6 @@ class MBPOTrainer(BaseTrainer):
                     traj_length = 0
                     traj_return = 0
                 self.tot_env_steps += 1
-                if self.tot_env_steps <= self.start_timestep:
-                    continue
 
                 if self.tot_env_steps % self.train_model_interval == 0 and self.model_env_ratio > 0.0:
                     #train model
@@ -123,11 +140,12 @@ class MBPOTrainer(BaseTrainer):
 
                 train_agent_start_time = time()
                 #train agent
-                for agent_update_step in range(self.num_agent_updates_per_env_step) :
-                    if tot_agent_update_steps > self.tot_env_steps * self.max_agent_updates_per_env_step:
-                        break
-                    loss_dict = self.train_agent()
-                    tot_agent_update_steps += 1
+                if self.tot_env_steps > self.start_train_agent_timestep:
+                    for agent_update_step in range(self.num_agent_updates_per_env_step) :
+                        if tot_agent_update_steps > self.tot_env_steps * self.max_agent_updates_per_env_step:
+                            break
+                        loss_dict = self.train_agent()
+                        tot_agent_update_steps += 1
 
                 train_agent_used_time =  time() - train_agent_start_time
                 util.logger.log_var("times/train_agent", train_agent_used_time, self.tot_env_steps)
@@ -188,13 +206,11 @@ class MBPOTrainer(BaseTrainer):
 
     def resize_model_buffer(self, rollout_length):
         rollouts_per_epoch = self.rollout_batch_size * self.num_env_steps_per_epoch / self.train_model_interval
-        new_model_buffer_size = int(rollout_length * rollouts_per_epoch)
+        new_model_buffer_size = int(rollout_length * rollouts_per_epoch * self.model_retain_epochs)
 
-        previous_transitions = self.model_buffer.sample_batch(self.model_buffer.max_sample_size)
-        self.model_buffer = ReplayBuffer( self.model_buffer.obs_space,  self.model_buffer.action_space, max_buffer_size = new_model_buffer_size)
-        self.model_buffer.add_traj(**previous_transitions)
+        self.model_buffer.resize(new_model_buffer_size)
 
-
+    @torch.no_grad()
     def rollout_model(self, model_rollout_steps):
         train_model_data_batch =  self.env_buffer.sample_batch(self.rollout_batch_size, to_tensor=False, allow_duplicate=True)
         obs_batch = train_model_data_batch['obs']
@@ -204,16 +220,14 @@ class MBPOTrainer(BaseTrainer):
         for rollout_batch_id in range(rollout_batch_nums):
             
             obs_minibatch = obs_batch[rollout_batch_id * self.rollout_mini_batch_size: min(len(obs_batch), (rollout_batch_id + 1) * self.rollout_mini_batch_size)]
-
             for rollout_step in range(model_rollout_steps):
                 action_minibatch, _ = self.agent.select_action(obs_minibatch)
                 next_obs_minibatch, reward_minibatch, done_minibatch, info = self.transition_model.predict(obs_minibatch, action_minibatch)
                 done_minibatch = [float(d) for d in done_minibatch]
                 self.model_buffer.add_traj(obs_minibatch, action_minibatch, next_obs_minibatch, reward_minibatch, done_minibatch)
-                obs_minibatch = np.array([obs_pred for obs_pred, done_pred in zip(next_obs_minibatch, done_minibatch) if not done_pred])
+                obs_minibatch = np.array([next_obs_pred for next_obs_pred, done_pred in zip(next_obs_minibatch, done_minibatch) if not done_pred])
                 if len(obs_minibatch) == 0:
                     break
-
 
         util.logger.log_var("misc/env_obs_mean", np.mean(obs_batch), self.tot_env_steps)
         util.logger.log_var("misc/env_obs_var", np.var(obs_batch), self.tot_env_steps)
