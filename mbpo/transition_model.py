@@ -11,6 +11,7 @@ class TransitionModel:
             obs_space, 
             action_space, 
             env_name, 
+            model_batch_size=256,
             holdout_ratio=0.1, 
             inc_var_loss=False, 
             use_weight_decay=False,
@@ -27,8 +28,9 @@ class TransitionModel:
         self.holdout_ratio = holdout_ratio
         self.inc_var_loss = inc_var_loss
         self.use_weight_decay = use_weight_decay
+        self.obs_scaler = StandardScaler()
+        self.act_scaler = StandardScaler()
 
-        self.scaler = StandardScaler()
 
     def _termination_fn(self, env_name, obs, act, next_obs):
         # TODO: add more done function
@@ -90,34 +92,49 @@ class TransitionModel:
 
         return log_prob, stds
 
- 
+    @torch.no_grad()
+    def select_elite_models(self, data):
+        obs_list, action_list, next_obs_list, reward_list = \
+            itemgetter("obs",'action','next_obs', 'reward')(data)
+        
+        model_input = torch.cat([obs_list, action_list], dim=-1)
+
+        predictions = self.model.predict(model_input)
+        groundtruths = torch.cat((next_obs_list - obs_list, reward_list), dim=1)
+        test_mean_losses, test_var_losses  = self.model_loss(predictions, groundtruths)
+        test_losses = (test_mean_losses + test_var_losses).detach().cpu().numpy()
+        idx = np.argsort(test_losses)
+        self.model.elite_model_idxes = idx[:self.model.num_elite]
+        
+    def update_scaler(self, obs, action):
+        self.obs_scaler.update(obs)
+        self.act_scaler.update(action)
+    
+    def transform_obs_action(self, obs, action):
+        obs = self.obs_scaler.transform(obs)
+        action = self.act_scaler.transform(action)
+        return obs, action
+
     def update(self, data_batch):
         #compute the number of holdout samples
         batch_size = data_batch['obs'].shape[0]
         num_holdout = int(batch_size * self.holdout_ratio)
 
         #permutate samples
-        obs_batch, action_batch, next_obs_batch, reward_batch, = \
+        obs_batch, action_batch, next_obs_batch, reward_batch = \
             itemgetter("obs",'action','next_obs', 'reward')(data_batch)
 
-        #divide samples into training samples and testing samples
-        train_obs_batch, train_action_batch, train_next_obs_batch, train_reward_batch = \
-            obs_batch[num_holdout:], action_batch[num_holdout:], next_obs_batch[num_holdout:], reward_batch[num_holdout:]
-        test_obs_batch, test_action_batch, test_next_obs_batch, test_reward_batch = \
-            obs_batch[:num_holdout], action_batch[:num_holdout], next_obs_batch[:num_holdout], reward_batch[:num_holdout]
-        obs_dim = train_obs_batch.shape[1]
-        self.scaler.fit(torch.cat([train_obs_batch, train_action_batch], dim=1))
-        scaled_train_batch = self.scaler.transform(torch.cat([train_obs_batch, train_action_batch], dim=1))
-        scaled_test_batch = self.scaler.transform(torch.cat([test_obs_batch, test_action_batch], dim=1))
+        delta_obs_batch = next_obs_batch - obs_batch
+        self.update_scaler(obs_batch, action_batch)
+        obs_batch, action_batch = self.transform_obs_action(obs_batch, action_batch)
 
-        train_obs_batch, train_action_batch = scaled_train_batch[:, :obs_dim], scaled_train_batch[:, obs_dim:]
-        test_obs_batch, test_action_batch = scaled_test_batch[:, :obs_dim], scaled_test_batch[:, obs_dim:]
         #predict with model
-        predictions = self.model.predict(train_obs_batch, train_action_batch)
+        model_input = torch.cat([obs_batch, action_batch], dim=-1)
+        predictions = self.model.predict(model_input)
         
         #compute training loss
-        groundtruth_obs_reward = torch.cat((train_next_obs_batch - train_obs_batch, train_reward_batch), dim=1)
-        train_mean_losses, train_var_losses = self.model_loss(predictions, groundtruth_obs_reward)
+        groundtruths = torch.cat((delta_obs_batch, reward_batch), dim=1)
+        train_mean_losses, train_var_losses = self.model_loss(predictions, groundtruths)
         train_mean_loss = torch.sum(train_mean_losses)
         train_var_loss = torch.sum(train_var_losses)
         train_transition_loss = train_mean_loss + train_var_loss
@@ -133,13 +150,6 @@ class TransitionModel:
         self.model_optimizer.step()
 
         #compute testing loss for elite model
-        with torch.no_grad():
-            test_predictions = self.model.predict(test_obs_batch, test_action_batch)
-            test_obs_reward = torch.cat((test_next_obs_batch - test_obs_batch, test_reward_batch), dim=1)
-            test_mean_losses, test_var_losses  = self.model_loss(test_predictions, test_obs_reward)
-            test_losses = (test_mean_losses + test_var_losses).detach().cpu()
-            idx = np.argsort(test_losses)
-            self.model.elite_model_idxes = idx[:self.model.num_elite]
         
         return {
             "loss/train_transition_loss_mean": train_mean_loss.item(),
@@ -168,25 +178,24 @@ class TransitionModel:
     @torch.no_grad()  
     def predict(self, obs, act, deterministic=False):
         if len(obs.shape) == 1:
-            obs = obs[None]
-            act = act[None]
-            return_single = True
-        else:
-            return_single = False
-        obs = torch.FloatTensor(obs).to(util.device)
-        act = torch.FloatTensor(act).to(util.device)
-        obs_dim = obs.shape[1]
-        scaled_data = self.scaler.transform(torch.cat([obs, act], dim=1))
+            obs = obs[None,]
+            act = act[None,]
+        if not isinstance(obs, torch.Tensor):
+            obs = torch.FloatTensor(obs).to(util.device)
+        if not isinstance(act, torch.Tensor):
+            act = torch.FloatTensor(act).to(util.device)
 
-        obs, act = scaled_data[:, :obs_dim], scaled_data[:, obs_dim:]
-        pred_means, pred_logvars = self.model.predict(obs, act)
+        scaled_obs, scaled_act = self.transform_obs_action(obs, act)
+        
+        model_input = torch.cat([scaled_obs, scaled_act], dim=-1)
+        pred_means, pred_logvars = self.model.predict(model_input)
         pred_means = pred_means.detach().cpu().numpy()
         pred_vars = pred_logvars.exp().detach().cpu().numpy()
         #add curr obs for next obs
         obs = obs.detach().cpu().numpy()
         act = act.detach().cpu().numpy()
         pred_means[:, :, :-1] += obs[None,].repeat(pred_means.shape[0], axis=0)
-        ensemble_model_stds = np.sqrt(pred_vars)
+        ensemble_model_stds = pred_logvars.detach().cpu().numpy()
 
         if deterministic:
             ensemble_samples = pred_means
@@ -194,7 +203,6 @@ class TransitionModel:
             ensemble_samples = pred_means + np.random.normal(size=pred_means.shape) * ensemble_model_stds
 
         num_models, batch_size, _ = pred_means.shape
-
         model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
         batch_idxes = np.arange(0, batch_size)
 
@@ -211,44 +219,37 @@ class TransitionModel:
         return_means = np.concatenate((model_means[:, :-1], terminals[:,None], model_means[:, -1:]), axis=-1)
         return_stds = np.concatenate((model_stds[:, :-1], np.zeros((batch_size, 1)), model_stds[:, -1:]), axis=-1)
 
-        if return_single:
-            next_obs = next_obs[0]
-            return_means = return_means[0]
-            return_stds = return_stds[0]
-            rewards = rewards[0]
-            terminals = terminals[0]
-
         assert(type(next_obs) == np.ndarray)
 
         info = {'mean': return_means, 'std': return_stds, 'log_prob': log_prob, 'dev': dev}
         return next_obs, rewards, terminals, info
 
-    def forward(self, obs, act, deterministic=False):
-        pred_means, pred_logvars = self.model.predict(obs, act)
-        ensemble_model_means, ensemble_model_vars = [], []
-        for (mean, var) in zip(torch.unbind(pred_means), torch.unbind(pred_logvars)):
-            ensemble_model_means.append(mean)
-            ensemble_model_vars.append(var.exp())
-        ensemble_model_means, ensemble_model_vars = \
-            torch.stack(ensemble_model_means), torch.stack(ensemble_model_vars)
-        ensemble_model_means[:, :, :-1] += obs
-        ensemble_model_stds = torch.sqrt(ensemble_model_vars)
+    # def forward(self, obs, act, deterministic=False):
+    #     pred_means, pred_logvars = self.model.predict(obs, act)
+    #     ensemble_model_means, ensemble_model_vars = [], []
+    #     for (mean, var) in zip(torch.unbind(pred_means), torch.unbind(pred_logvars)):
+    #         ensemble_model_means.append(mean)
+    #         ensemble_model_vars.append(var.exp())
+    #     ensemble_model_means, ensemble_model_vars = \
+    #         torch.stack(ensemble_model_means), torch.stack(ensemble_model_vars)
+    #     ensemble_model_means[:, :, :-1] += obs
+    #     ensemble_model_stds = torch.sqrt(ensemble_model_vars)
 
-        if deterministic:
-            ensemble_samples = ensemble_model_means
-        else:
-            ensemble_samples = ensemble_model_means + torch.randn_like(ensemble_model_means.shape) * ensemble_model_stds
+    #     if deterministic:
+    #         ensemble_samples = ensemble_model_means
+    #     else:
+    #         ensemble_samples = ensemble_model_means + torch.randn_like(ensemble_model_means.shape) * ensemble_model_stds
 
-        num_models, batch_size, _ = ensemble_model_means.shape
+    #     num_models, batch_size, _ = ensemble_model_means.shape
 
-        model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
-        batch_idxes = np.arange(0, batch_size)
+    #     model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
+    #     batch_idxes = np.arange(0, batch_size)
 
-        samples = ensemble_samples[model_idxes, batch_idxes]
+    #     samples = ensemble_samples[model_idxes, batch_idxes]
 
-        next_obs, rewards = samples[:, :-1] + obs, samples[:, -1]
+    #     next_obs, rewards = samples[:, :-1] + obs, samples[:, -1]
 
-        return next_obs, rewards
+    #     return next_obs, rewards
 
     def save_model(self, epoch):
         save_dir = os.path.join(util.logger.log_path, 'models')

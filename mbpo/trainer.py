@@ -7,8 +7,9 @@ import os
 from tqdm import  trange
 import torch
 import random
-from unstable_baselines.common import util
-from unstable_baselines.common.buffer import ReplayBuffer
+from unstable_baselines.common import util, functional
+from unstable_baselines.common.functional import dict_batch_generator
+
 class MBPOTrainer(BaseTrainer):
     def __init__(self, agent, env, eval_env, transition_model, env_buffer, model_buffer, rollout_step_generator,
             agent_batch_size=100,
@@ -32,6 +33,7 @@ class MBPOTrainer(BaseTrainer):
             save_video_demo_interval=10000,
             log_interval=100,
             model_env_ratio=0.8,
+            hold_out_ratio=0.1,
             load_dir="",
             train_log_interval=100,
             **kwargs):
@@ -64,6 +66,7 @@ class MBPOTrainer(BaseTrainer):
         self.start_train_agent_timestep = start_train_agent_timestep
         self.log_interval = log_interval
         self.model_env_ratio = model_env_ratio
+        self.hold_out_ratio = hold_out_ratio
         self.train_log_interval = train_log_interval
         if load_dir != "" and os.path.exists(load_dir):
             self.agent.load(load_dir)
@@ -77,6 +80,8 @@ class MBPOTrainer(BaseTrainer):
             obs = next_obs
             if done:
                 obs = self.env.reset()
+
+        env_data = self.env_buffer.sample(self.env_buffer.max_sample_size)
 
 
     def train(self):
@@ -135,8 +140,8 @@ class MBPOTrainer(BaseTrainer):
                     #rollout model
                     self.rollout_model(model_rollout_steps=model_rollout_steps)
 
-                for loss_name in model_loss_dict:
-                    util.logger.log_var(loss_name, model_loss_dict[loss_name], self.tot_env_steps) 
+                    for loss_name in model_loss_dict:
+                        util.logger.log_var(loss_name, model_loss_dict[loss_name], self.tot_env_steps) 
 
                 train_agent_start_time = time()
                 #train agent
@@ -185,23 +190,23 @@ class MBPOTrainer(BaseTrainer):
             if self.save_video_demo_interval > 0 and epoch % self.save_video_demo_interval == 0:
                 self.save_video_demo(epoch)
 
-    def merge_data_batch(self, data1_dict, data2_dict):
-        for key in data1_dict:
-            if isinstance(data1_dict[key], np.ndarray):
-                data1_dict[key]  = np.concatenate([data1_dict[key], data2_dict[key]], axis=0)
-            elif isinstance(data1_dict[key], torch.Tensor):
-                data1_dict[key]  = torch.cat([data1_dict[key], data2_dict[key]], dim=0)
-        return data1_dict
+
 
     def train_model(self):
-        data_indices = list(range(self.env_buffer.max_sample_size))
-        random.shuffle(data_indices)
-        num_batches = int(np.ceil(self.env_buffer.max_sample_size / self.model_batch_size))
-        for model_train_step in range(num_batches):
-            batch_indices = data_indices[model_train_step * self.model_batch_size: min(len (data_indices), (model_train_step + 1) * self.model_batch_size)]
-            data_batch = self.env_buffer.get_batch(batch_indices)
-            model_loss_dict = self.transition_model.update(data_batch)
-        #print("\033[32menv\033[0m", data_batch['done'].shape, data_batch['done'][:min(3, len(data_batch['done']))])
+        self.transition_model.obs_scaler.clear()
+        self.transition_model.act_scaler.clear()
+        num_train_data = int( self.env_buffer.max_sample_size * (1.0 - self.hold_out_ratio) )
+        env_data = self.env_buffer.sample(self.env_buffer.max_sample_size)
+        env_data['delta_obs'] = env_data['next_obs'] - env_data['obs']
+        train_data, eval_data ={}, {}
+        for key in env_data.keys():
+            train_data[key] = env_data[key][:num_train_data]
+            eval_data[key] = env_data[key][num_train_data:]
+        #scale data
+        for train_data_batch in dict_batch_generator(train_data, self.model_batch_size):
+            model_loss_dict = self.transition_model.update(train_data_batch)
+        # evaluate data to update the elite model
+        self.transition_model.select_elite_models(eval_data)
         return model_loss_dict
 
     def resize_model_buffer(self, rollout_length):
@@ -212,9 +217,9 @@ class MBPOTrainer(BaseTrainer):
 
     @torch.no_grad()
     def rollout_model(self, model_rollout_steps):
-        train_model_data_batch =  self.env_buffer.sample_batch(self.rollout_batch_size, to_tensor=False, allow_duplicate=True)
-        obs_batch = train_model_data_batch['obs']
-        next_obs_batch = train_model_data_batch['next_obs']
+        rollout_data_batch =  self.env_buffer.sample(self.rollout_batch_size, to_tensor=False, allow_duplicate=True)
+        obs_batch = rollout_data_batch['obs']
+        next_obs_batch = rollout_data_batch['next_obs']
         #perform k-step model rollout starting from s_t using policy\pi
         rollout_batch_nums = int(np.ceil(self.rollout_batch_size / self.rollout_mini_batch_size))
         for rollout_batch_id in range(rollout_batch_nums):
@@ -222,10 +227,12 @@ class MBPOTrainer(BaseTrainer):
             obs_minibatch = obs_batch[rollout_batch_id * self.rollout_mini_batch_size: min(len(obs_batch), (rollout_batch_id + 1) * self.rollout_mini_batch_size)]
             for rollout_step in range(model_rollout_steps):
                 action_minibatch, _ = self.agent.select_action(obs_minibatch)
+
                 next_obs_minibatch, reward_minibatch, done_minibatch, info = self.transition_model.predict(obs_minibatch, action_minibatch)
                 done_minibatch = [float(d) for d in done_minibatch]
                 self.model_buffer.add_traj(obs_minibatch, action_minibatch, next_obs_minibatch, reward_minibatch, done_minibatch)
                 obs_minibatch = np.array([next_obs_pred for next_obs_pred, done_pred in zip(next_obs_minibatch, done_minibatch) if not done_pred])
+                
                 if len(obs_minibatch) == 0:
                     break
 
@@ -235,12 +242,33 @@ class MBPOTrainer(BaseTrainer):
         util.logger.log_var("misc/env_next_obs_var", np.var(next_obs_batch), self.tot_env_steps)
     
     def train_agent(self):
-        model_data_batch = self.model_buffer.sample_batch(int(self.agent_batch_size * self.model_env_ratio))
-        env_data_batch = self.env_buffer.sample_batch(int(self.agent_batch_size * (1.0 - self.model_env_ratio)))
-        data_batch = self.merge_data_batch(model_data_batch, env_data_batch)
+        model_data_batch = self.model_buffer.sample(int(self.agent_batch_size * self.model_env_ratio))
+        env_data_batch = self.env_buffer.sample(int(self.agent_batch_size * (1.0 - self.model_env_ratio)))
+        data_batch = functional.merge_data_batch(model_data_batch, env_data_batch)
         loss_dict = self.agent.update(data_batch)
         return loss_dict
 
             
-
+    @torch.no_grad()
+    def test(self):
+        rewards = []
+        lengths = []
+        for episode in range(self.num_test_trajectories):
+            traj_reward = 0
+            traj_length = 0
+            state = self.eval_env.reset()
+            for step in range(self.max_trajectory_length):
+                action, _ = self.agent.select_action(state, deterministic=True)
+                next_state, reward, done, _ = self.eval_env.step(action)
+                traj_reward += reward
+                state = next_state
+                traj_length += 1 
+                if done:
+                    break
+            lengths.append(traj_length)
+            rewards.append(traj_reward)
+        return {
+            "return/test": np.mean(rewards),
+            "length/test": np.mean(lengths)
+        }
 

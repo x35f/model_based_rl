@@ -4,7 +4,7 @@ import os
 from unstable_baselines.common.agents import BaseAgent
 from unstable_baselines.common.networks import MLPNetwork, PolicyNetworkFactory, get_optimizer
 import numpy as np
-from unstable_baselines.common import util 
+from unstable_baselines.common import util, functional
 from operator import itemgetter
 
 class MBPOAgent(torch.nn.Module, BaseAgent):
@@ -26,8 +26,8 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         self.policy_network = PolicyNetworkFactory.get(obs_dim, action_space,  ** kwargs['policy_network'])
         
         #sync network parameters
-        util.soft_update_network(self.q1_network, self.target_q1_network, 1.0)
-        util.soft_update_network(self.q2_network, self.target_q2_network, 1.0)
+        functional.soft_update_network(self.q1_network, self.target_q1_network, 1.0)
+        functional.soft_update_network(self.q2_network, self.target_q2_network, 1.0)
 
         #pass to util.device
         self.q1_network = self.q1_network.to(util.device)
@@ -103,11 +103,11 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         
         #compute policy and ent loss
         policy_loss = ((self.alpha * new_curr_state_log_pi) - new_min_curr_state_q_value).mean()
-        policy_loss_value = policy_loss.detach().cpu().numpy()
+        policy_loss_value = policy_loss.item()
 
         if self.automatic_entropy_tuning:
             alpha_loss = -(self.log_alpha * (new_curr_state_log_pi + self.target_entropy).detach()).mean()
-            alpha_loss_value = alpha_loss.detach().cpu().item()
+            alpha_loss_value = alpha_loss.item()
             self.alpha_optim.zero_grad()
         else:
             alpha_loss = 0.
@@ -147,13 +147,13 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         
 
     def try_update_target_network(self):
-        util.soft_update_network(self.q1_network, self.target_q1_network, self.target_smoothing_tau)
-        util.soft_update_network(self.q2_network, self.target_q2_network, self.target_smoothing_tau)
+        functional.soft_update_network(self.q1_network, self.target_q1_network, self.target_smoothing_tau)
+        functional.soft_update_network(self.q2_network, self.target_q2_network, self.target_smoothing_tau)
 
     @torch.no_grad()  
     def select_action(self, obs, deterministic=False):
         if len(obs.shape) == 1:
-            obs = obs[None, :]
+            obs = obs[None,]
     
         if not isinstance(obs, torch.Tensor):
             obs = torch.FloatTensor(obs).to(util.device)

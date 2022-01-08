@@ -34,6 +34,12 @@
   },
 
   "transition_model":{
+    "model_batch_size": 256,
+    "use_weight_decay": true,
+    "optimizer_class": "Adam",
+    "learning_rate":0.001,
+    "holdout_ratio": 0.1,
+    "inc_var_loss": true,
     "model":{
       "hidden_dims": [200, 200, 200, 200],
       "decay_weights": [0.000025, 0.00005, 0.000075, 0.000075, 0.0001],
@@ -41,12 +47,7 @@
       "out_act_fn": "identity",
       "num_elite": 5,
       "ensemble_size": 7
-    },
-    "use_weight_decay": true,
-    "optimizer_class": "Adam",
-    "learning_rate":0.001,
-    "holdout_ratio": 0.1,
-    "inc_var_loss": true
+    }
   },
   "rollout_step_scheduler":{
     "initial_val": 1,
@@ -58,7 +59,6 @@
   "trainer":{
     "max_epoch": 125,
     "agent_batch_size": 256,
-    "model_batch_size": 256,
     "rollout_batch_size": 100000,
     "rollout_mini_batch_size": 10000,
     "model_retain_epochs": 1,
@@ -71,7 +71,7 @@
     "save_model_interval": 2000,
     "start_train_model_timestep": 5000,
     "start_train_agent_timestep": 1000,
-    "save_video_demo_interval": -1,
+    "save_video_demo_interval": 1,
     "log_interval": 1,
     "model_env_ratio": 0.95,
     "num_model_rollouts": 400,
