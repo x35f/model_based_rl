@@ -5,13 +5,12 @@ from unstable_baselines.common import util
 from unstable_baselines.common.networks import get_optimizer
 from unstable_baselines.model_based_rl.common.models import EnsembleModel
 from operator import itemgetter
-from unstable_baselines.common.scaler import StandardScaler
+from unstable_baselines.common.normalizer import StandardNormalizer
 class TransitionModel:
     def __init__(self, 
             obs_space, 
             action_space, 
             env_name, 
-            model_batch_size=256,
             holdout_ratio=0.1, 
             inc_var_loss=False, 
             use_weight_decay=False,
@@ -19,17 +18,29 @@ class TransitionModel:
         
         obs_dim = obs_space.shape[0]
         action_dim = action_space.shape[0]
+
+        print("network")
         self.model = EnsembleModel(obs_dim=obs_dim, action_dim=action_dim, device=util.device, **kwargs['model'])
         self.env_name = env_name
+        # print("params", type(self.model.parameters()))
+        # for i, p in enumerate(self.model.parameters()):
+        #     print(i, p.shape)
+        # exit(0)
+
+        print("optim")
         self.model_optimizer = get_optimizer(optimizer_class=kwargs['optimizer_class'], network=self.model, learning_rate=kwargs['learning_rate'] )
         self.networks = {
             "model": self.model
         }
+
+        print("others")
+        self.obs_space = obs_space
         self.holdout_ratio = holdout_ratio
         self.inc_var_loss = inc_var_loss
         self.use_weight_decay = use_weight_decay
-        self.obs_scaler = StandardScaler()
-        self.act_scaler = StandardScaler()
+        self.obs_normalizer = StandardNormalizer()
+        self.act_normalizer = StandardNormalizer()
+        self.model_train_timesteps = 0
 
 
     def _termination_fn(self, env_name, obs, act, next_obs):
@@ -75,22 +86,18 @@ class TransitionModel:
         else:
             raise NotImplementedError
 
-    def _get_logprob(self, x, means, variances):
 
-        k = x.shape[-1]
+    @torch.no_grad()
+    def eval_data(self, data):
+        obs_list, action_list, next_obs_list, reward_list = \
+            itemgetter("obs",'action','next_obs', 'reward')(data)
+        
+        model_input = torch.cat([obs_list, action_list], dim=-1)
 
-        ## [ num_networks, batch_size ]
-        log_prob = -1 / 2 * (k * np.log(2 * np.pi) + np.log(variances).sum(-1) + (np.power(x - means, 2) / variances).sum(-1))
-
-        ## [ batch_size ]
-        prob = np.exp(log_prob).sum(0)
-
-        ## [ batch_size ]
-        log_prob = np.log(prob)
-
-        stds = np.std(means, 0).mean(-1)
-
-        return log_prob, stds
+        predictions = self.model.predict(model_input)
+        groundtruths = torch.cat((next_obs_list - obs_list, reward_list), dim=1)
+        eval_mean_losses, _  = self.model_loss(predictions, groundtruths, mse_only=True)
+        return eval_mean_losses.detach().cpu().numpy(), None
 
     @torch.no_grad()
     def select_elite_models(self, data):
@@ -106,39 +113,37 @@ class TransitionModel:
         idx = np.argsort(test_losses)
         self.model.elite_model_idxes = idx[:self.model.num_elite]
         
-    def update_scaler(self, obs, action):
-        self.obs_scaler.update(obs)
-        self.act_scaler.update(action)
+    def reset_normalizers(self):
+        self.obs_normalizer.reset()
+        self.act_normalizer.reset()
+        
+    def update_normalizer(self, obs, action):
+        self.obs_normalizer.update(obs)
+        self.act_normalizer.update(action)
     
     def transform_obs_action(self, obs, action):
-        obs = self.obs_scaler.transform(obs)
-        action = self.act_scaler.transform(action)
+        obs = self.obs_normalizer.transform(obs)
+        action = self.act_normalizer.transform(action)
         return obs, action
 
     def update(self, data_batch):
-        #compute the number of holdout samples
-        batch_size = data_batch['obs'].shape[0]
-        num_holdout = int(batch_size * self.holdout_ratio)
 
-        #permutate samples
         obs_batch, action_batch, next_obs_batch, reward_batch = \
             itemgetter("obs",'action','next_obs', 'reward')(data_batch)
 
         delta_obs_batch = next_obs_batch - obs_batch
-        self.update_scaler(obs_batch, action_batch)
         obs_batch, action_batch = self.transform_obs_action(obs_batch, action_batch)
 
         #predict with model
         model_input = torch.cat([obs_batch, action_batch], dim=-1)
         predictions = self.model.predict(model_input)
-        
         #compute training loss
-        groundtruths = torch.cat((delta_obs_batch, reward_batch), dim=1)
+        groundtruths = torch.cat((delta_obs_batch, reward_batch), dim=-1)
         train_mean_losses, train_var_losses = self.model_loss(predictions, groundtruths)
         train_mean_loss = torch.sum(train_mean_losses)
         train_var_loss = torch.sum(train_var_losses)
         train_transition_loss = train_mean_loss + train_var_loss
-        train_transition_loss += 0.01 * torch.sum(self.model.max_logvar) - 0.01 * torch.sum(self.model.min_logvar) # why
+        train_transition_loss += 0.01 * torch.sum(self.model.max_std) - 0.01 * torch.sum(self.model.min_std) # why
         if self.use_weight_decay:
             decay_loss = self.model.get_decay_loss()
             train_transition_loss += decay_loss
@@ -152,27 +157,28 @@ class TransitionModel:
         #compute testing loss for elite model
         
         return {
-            "loss/train_transition_loss_mean": train_mean_loss.item(),
-            "loss/train_transition_loss_var": train_var_loss.item(),
-            "loss/train_transition_loss": train_var_loss.item(),
+            "loss/train_transition_loss_mean": train_mean_loss.item()/self.model.ensemble_size,
+            "loss/train_transition_loss_var": train_var_loss.item()/self.model.ensemble_size,
+            "loss/train_transition_loss": train_var_loss.item()/self.model.ensemble_size,
             "loss/decay_loss": decay_loss.item() if decay_loss is not None else 0,
-            "misc/max_logvar_mean": self.model.max_logvar.mean().item(),
-            "misc/max_logvar_var": self.model.max_logvar.var().item(),
-            "misc/min_logvar_mean": self.model.min_logvar.mean().item(),
-            "misc/max_logvar_var": self.model.min_logvar.var().item()
+            "misc/max_std_mean": self.model.max_std.mean().item(),
+            "misc/max_std_var": self.model.max_std.var().item(),
+            "misc/min_std_mean": self.model.min_std.mean().item(),
+            "misc/max_std_var": self.model.min_std.var().item()
         }
 
-    def model_loss(self, predictions, groundtruths):
-        pred_means, pred_logvars = predictions
-        if self.inc_var_loss:
+    def model_loss(self, predictions, groundtruths, mse_only=False):
+        pred_means, pred_stds = predictions
+        if self.inc_var_loss and not mse_only:
             # Average over batch and dim, sum over ensembles.
-            inv_var = torch.exp(-pred_logvars)
+            inv_var = torch.exp(-pred_stds)
             mean_losses = torch.mean(torch.mean(torch.pow(pred_means - groundtruths, 2) * inv_var, dim=-1), dim=-1)
-            var_losses = torch.mean(torch.mean(pred_logvars, dim=-1), dim=-1)
-        else:
+            var_losses = torch.mean(torch.mean(pred_stds, dim=-1), dim=-1)
+        elif mse_only:
             mean_losses = torch.mean(torch.pow(pred_means - groundtruths, 2), dim=(1, 2))
             var_losses = None
-
+        else:
+            assert 0
         return mean_losses, var_losses
 
     @torch.no_grad()  
@@ -188,19 +194,17 @@ class TransitionModel:
         scaled_obs, scaled_act = self.transform_obs_action(obs, act)
         
         model_input = torch.cat([scaled_obs, scaled_act], dim=-1)
-        pred_means, pred_logvars = self.model.predict(model_input)
+        pred_means, pred_stds = self.model.predict(model_input)
         pred_means = pred_means.detach().cpu().numpy()
-        pred_vars = pred_logvars.exp().detach().cpu().numpy()
         #add curr obs for next obs
         obs = obs.detach().cpu().numpy()
         act = act.detach().cpu().numpy()
-        pred_means[:, :, :-1] += obs[None,].repeat(pred_means.shape[0], axis=0)
-        ensemble_model_stds = pred_logvars.detach().cpu().numpy()
-
+        pred_means[:, :, :-1] += obs
+        ensemble_model_stds = pred_stds.detach().cpu().numpy()
         if deterministic:
             ensemble_samples = pred_means
         else:
-            ensemble_samples = pred_means + np.random.normal(size=pred_means.shape) * ensemble_model_stds
+            ensemble_samples = pred_means +  np.random.normal(size=pred_means.shape) * ensemble_model_stds
 
         num_models, batch_size, _ = pred_means.shape
         model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
@@ -210,9 +214,8 @@ class TransitionModel:
         model_means = pred_means[model_idxes, batch_idxes]
         model_stds = ensemble_model_stds[model_idxes, batch_idxes]
 
-        log_prob, dev = self._get_logprob(samples, pred_means, pred_vars)
-
-        next_obs, rewards = samples[:, :-1] + obs, samples[:, -1]
+        next_obs, rewards = samples[:, :-1], samples[:, -1]
+        next_obs = np.clip(next_obs, self.obs_space.low, self.obs_space.high)
         terminals = self._termination_fn(self.env_name, obs, act, next_obs)
 
         batch_size = model_means.shape[0]
@@ -221,41 +224,50 @@ class TransitionModel:
 
         assert(type(next_obs) == np.ndarray)
 
-        info = {'mean': return_means, 'std': return_stds, 'log_prob': log_prob, 'dev': dev}
+        info = {'mean': return_means, 'std': return_stds}
         return next_obs, rewards, terminals, info
 
-    # def forward(self, obs, act, deterministic=False):
-    #     pred_means, pred_logvars = self.model.predict(obs, act)
-    #     ensemble_model_means, ensemble_model_vars = [], []
-    #     for (mean, var) in zip(torch.unbind(pred_means), torch.unbind(pred_logvars)):
-    #         ensemble_model_means.append(mean)
-    #         ensemble_model_vars.append(var.exp())
-    #     ensemble_model_means, ensemble_model_vars = \
-    #         torch.stack(ensemble_model_means), torch.stack(ensemble_model_vars)
-    #     ensemble_model_means[:, :, :-1] += obs
-    #     ensemble_model_stds = torch.sqrt(ensemble_model_vars)
+    def update_best_snapshots(self, val_losses):
+        updated = False
+        for i in range(len(val_losses)):
+            current_loss = val_losses[i]
+            best_loss = self.best_snapshot_losses[i]
+            improvement = (best_loss - current_loss) / best_loss
+            if improvement > 0.01:
+                self.best_snapshot_losses[i] = current_loss
+                self.save_model_snapshot(i)
+                updated = True
+                improvement = (best_loss - current_loss) / best_loss
+                # print('epoch {} | updated {} | improvement: {:.4f} | best: {:.4f} | current: {:.4f}'.format(epoch, i, improvement, best, current))
+        
+        return updated
 
-    #     if deterministic:
-    #         ensemble_samples = ensemble_model_means
-    #     else:
-    #         ensemble_samples = ensemble_model_means + torch.randn_like(ensemble_model_means.shape) * ensemble_model_stds
+    def reset_best_snapshots(self):
+        self.model_best_snapshots = [None for _ in range(self.model.ensemble_size)]
+        self.best_snapshot_losses = [1e10 for _ in range(self.model.ensemble_size)]
 
-    #     num_models, batch_size, _ = ensemble_model_means.shape
+    def save_model_snapshot(self, idx):
+        self.model_best_snapshots[idx] = self.model.ensemble_models[idx].state_dict()
 
-    #     model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
-    #     batch_idxes = np.arange(0, batch_size)
+    def load_best_snapshots(self):
+        self.model.load_state_dicts(self.model_best_snapshots)
 
-    #     samples = ensemble_samples[model_idxes, batch_idxes]
-
-    #     next_obs, rewards = samples[:, :-1] + obs, samples[:, -1]
-
-    #     return next_obs, rewards
-
-    def save_model(self, epoch):
+    def save_model(self, info):
         save_dir = os.path.join(util.logger.log_path, 'models')
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        model_save_dir = os.path.join(save_dir, "ite_{}".format(epoch))
+        model_save_dir = os.path.join(save_dir, "ite_{}".format(info))
+        if not os.path.exists(model_save_dir):
+            os.makedirs(model_save_dir)
+        for network_name, network in self.networks.items():
+            save_path = os.path.join(model_save_dir, network_name + ".pt")
+            torch.save(network, save_path)
+
+    def load_model(self, info):
+        save_dir = os.path.join(util.logger.log_path, 'models')
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        model_save_dir = os.path.join(save_dir, "ite_{}".format(info))
         if not os.path.exists(model_save_dir):
             os.makedirs(model_save_dir)
         for network_name, network in self.networks.items():

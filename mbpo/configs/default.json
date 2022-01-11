@@ -4,7 +4,7 @@
     "max_buffer_size": 1000000
   },
   "model_buffer":{
-    "max_buffer_size": 400000
+    "max_buffer_size": 4000000
   },
   "agent":{
     "gamma": 0.99,
@@ -35,7 +35,7 @@
 
   "transition_model":{
     "model_batch_size": 256,
-    "use_weight_decay": true,
+    "use_weight_decay": false,
     "optimizer_class": "Adam",
     "learning_rate":0.001,
     "holdout_ratio": 0.1,
@@ -77,6 +77,7 @@
     "num_model_rollouts": 400,
     "num_agent_updates_per_env_step": 20,
     "max_agent_updates_per_env_step": 5,
+    "max_model_update_epochs_to_improve": 5,
     "train_log_interval":50
   }
   

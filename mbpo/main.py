@@ -26,6 +26,7 @@ from unstable_baselines.common import util
 @click.option("--info", type=str, default="")
 @click.argument('args', nargs=-1)
 def main(config_path, log_dir, gpu, print_log, seed, info, args):
+    print(os.getcwd())
     #todo: add load and update parameters function
     args = load_config(config_path, args)
 
@@ -60,10 +61,11 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
     #initialize agent
     logger.log_str("Initializing Agent")
     agent = MBPOAgent(obs_space, action_space, env_name=env_name, **args['agent'])
-
+    print("initializing mdoel")
     #initialize env model predictor
     transition_model = TransitionModel(obs_space, action_space, env_name = env_name, **args['transition_model'])
 
+    print("initializing generator")
     #initialize rollout step generator
     rollout_step_generator = Scheduler(**args['rollout_step_scheduler'])
 

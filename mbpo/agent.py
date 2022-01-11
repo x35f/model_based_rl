@@ -17,7 +17,7 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         super(MBPOAgent, self).__init__()
         #save parameters
         self.args = kwargs
-
+        
         #initilze networks
         self.q1_network = MLPNetwork(obs_dim + action_dim, 1, **kwargs['q_network'])
         self.q2_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
@@ -133,7 +133,7 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             "loss/q2": q2_loss_value, 
             "loss/policy": policy_loss_value, 
             "loss/entropy": alpha_loss_value, 
-            "stats/entropy_alpha": alpha_value, 
+            "misc/entropy_alpha": alpha_value, 
             "misc/obs_mean": torch.mean(obs_batch).item(),
             "misc/obs_var": torch.var(obs_batch).item(),
             "misc/current_state_q1_mean": torch.mean(curr_state_q1_value).item(), 
