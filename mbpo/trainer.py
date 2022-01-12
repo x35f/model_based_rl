@@ -72,7 +72,7 @@ class MBPOTrainer(BaseTrainer):
         self.train_log_interval = train_log_interval
         if load_dir != "" and os.path.exists(load_dir):
             self.agent.load(load_dir)
-        self.model_train_timesteps = 0
+        self.model_tot_train_timesteps = 0
 
     def warmup(self):
         obs = self.env.reset()
@@ -92,17 +92,17 @@ class MBPOTrainer(BaseTrainer):
         epoch_durations = []
         traj_return = 0
         traj_length = 0
-        done = False
-        obs = self.env.reset()
-        tot_agent_update_steps = 0
-        model_rollout_steps = 1
-        model_loss_dict = {}
-        loss_dict = {}
         util.logger.log_str("Warming Up")
         self.warmup()
         self.tot_env_steps = self.start_train_model_timestep
+        
+        tot_agent_update_steps = 0
+        model_rollout_steps = int(self.rollout_step_generator.initial_val)
+        self.resize_model_buffer(model_rollout_steps)
+        model_loss_dict = {}
+        loss_dict = {}
         obs = self.env.reset()
-
+        done = False
         util.logger.log_str("Started Training")
         for epoch in trange(self.max_epoch, colour='blue', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
             
@@ -111,7 +111,6 @@ class MBPOTrainer(BaseTrainer):
             model_rollout_steps = int(self.rollout_step_generator.next())
             if prev_model_rollout_steps != model_rollout_steps:
                 self.resize_model_buffer(model_rollout_steps)
-                util.logger.log_var("misc/model_buffer_size", model_rollout_steps, self.tot_env_steps)
 
             #train model on env_buffer via maximum likelihood
             #for e steps do
@@ -137,13 +136,20 @@ class MBPOTrainer(BaseTrainer):
 
                 if self.tot_env_steps % self.train_model_interval == 0 and self.model_env_ratio > 0.0:
                     #train model
+                    train_model_start_time = time()
                     model_loss_dict = self.train_model()
 
+                    train_model_used_time =  time() - train_model_start_time
+
                     #rollout model
+                    rollout_model_start_time = time()
                     self.rollout_model(model_rollout_steps=model_rollout_steps)
+                    rollout_model_used_time =  time() - rollout_model_start_time
 
                     for loss_name in model_loss_dict:
                         util.logger.log_var(loss_name, model_loss_dict[loss_name], self.tot_env_steps) 
+                    util.logger.log_var("times/model_train", train_model_used_time, self.tot_env_steps)
+                    util.logger.log_var("times/rollout_model", rollout_model_used_time, self.tot_env_steps)
 
                 train_agent_start_time = time()
                 #train agent
@@ -216,10 +222,12 @@ class MBPOTrainer(BaseTrainer):
             for train_data_batch in dict_batch_generator(train_data, self.model_batch_size):
                 model_loss_dict = self.transition_model.update(train_data_batch)
                 model_train_iters += 1
+                self.model_tot_train_timesteps += 1
             
             model_train_epochs += 1
 
             eval_mse_losses, _ = self.transition_model.eval_data(eval_data)
+            util.logger.log_var("model/mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
             updated = self.transition_model.update_best_snapshots(eval_mse_losses)
             if updated > 0.01:
                 num_epochs_since_prev_best = 0
@@ -241,11 +249,12 @@ class MBPOTrainer(BaseTrainer):
         model_loss_dict['model/num_train_steps'] = model_train_iters
         return model_loss_dict
 
-    def resize_model_buffer(self, rollout_length,):
+    def resize_model_buffer(self, rollout_length):
         rollouts_per_epoch = self.rollout_batch_size * self.num_env_steps_per_epoch / self.train_model_interval
         new_model_buffer_size = int(rollout_length * rollouts_per_epoch * self.model_retain_epochs)
 
         self.model_buffer.resize(new_model_buffer_size)
+        util.logger.log_var("misc/model_buffer_size", new_model_buffer_size, self.tot_env_steps)
 
     @torch.no_grad()
     def rollout_model(self, model_rollout_steps):
@@ -257,7 +266,7 @@ class MBPOTrainer(BaseTrainer):
             
             obs_minibatch = obs_batch[rollout_batch_id * self.rollout_mini_batch_size: min(len(obs_batch), (rollout_batch_id + 1) * self.rollout_mini_batch_size)]
             for rollout_step in range(model_rollout_steps):
-                action_minibatch, _ = self.agent.select_action(obs_minibatch, deterministic=False)
+                action_minibatch, _ = self.agent.select_action(obs_minibatch, deterministic=True)
 
                 next_obs_minibatch, reward_minibatch, done_minibatch, info = self.transition_model.predict(obs_minibatch, action_minibatch)
                 done_minibatch = [float(d) for d in done_minibatch]

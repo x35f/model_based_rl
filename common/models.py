@@ -10,9 +10,9 @@ from unstable_baselines.common import util
 from unstable_baselines.common.networks import MLPNetwork
 
 class EnsembleModel(nn.Module):
-    def __init__(self, obs_dim, action_dim, hidden_dims, device, ensemble_size = 7, num_elite=5, weight_decays=None ,act_fn="swish", out_act_fn="identity", reward_dim=1,**kwargs):
+    def __init__(self, obs_dim, action_dim, hidden_dims, device, ensemble_size = 7, num_elite=5, decay_weights=None ,act_fn="swish", out_act_fn="identity", reward_dim=1,**kwargs):
         super(EnsembleModel, self).__init__()
-        assert(weight_decays is None or len(weight_decays) == len(hidden_dims) + 1)
+        assert(decay_weights is None or len(decay_weights) == len(hidden_dims) + 1)
         self.out_dim = obs_dim + reward_dim
 
         self.ensemble_models = [MLPNetwork(input_dim=obs_dim+action_dim, out_dim=self.out_dim*2, hidden_dims=hidden_dims, act_fn=act_fn, out_act_fn=out_act_fn) for _ in range(ensemble_size)]
@@ -23,6 +23,7 @@ class EnsembleModel(nn.Module):
         self.action_dim = action_dim
         self.num_elite = num_elite
         self.ensemble_size = ensemble_size
+        self.decay_weights = decay_weights
         self.elite_model_idxes = torch.tensor([i for i in range(num_elite)])
         self.max_std = nn.Parameter((torch.ones((1, self.out_dim)).float() / 2).to(device), requires_grad=True)
         self.min_std = nn.Parameter((-torch.ones((1, self.out_dim)).float() * 10).to(device), requires_grad=True)
