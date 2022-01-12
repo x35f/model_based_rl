@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import os
-from unstable_baselines.common import util
+from unstable_baselines.common import util, functional
 from unstable_baselines.common.networks import get_optimizer
 from unstable_baselines.model_based_rl.common.models import EnsembleModel
 from operator import itemgetter
@@ -71,7 +71,7 @@ class TransitionModel:
 
             done = y <= 1
             return done
-        elif env_name == "InvertedPendulum":
+        elif env_name == "InvertedPendulum-v2":
             notdone = np.isfinite(next_obs).all(axis=-1) \
                     * (np.abs(next_obs[:,1]) <= .2)
             done = ~notdone
@@ -82,34 +82,21 @@ class TransitionModel:
 
         return done
 
-
     @torch.no_grad()
-    def eval_data(self, data):
+    def eval_data(self, data, update_elite_models=False):
         obs_list, action_list, next_obs_list, reward_list = \
             itemgetter("obs",'action','next_obs', 'reward')(data)
         delta_obs_list = next_obs_list - obs_list
         obs_list, action_list = self.transform_obs_action(obs_list, action_list)
         model_input = torch.cat([obs_list, action_list], dim=-1)
 
-        predictions = self.model.predict(model_input)
+        predictions = functional.minibatch_inference(args=[model_input],rollout_fn=self.model.predict, batch_size=10000) # the inference size grows as model buffer increases
         groundtruths = torch.cat((delta_obs_list, reward_list), dim=1)
         eval_mse_losses, _  = self.model_loss(predictions, groundtruths, mse_only=True)
+        if update_elite_models:
+            elite_idx = np.argsort(eval_mse_losses.cpu().numpy())
+            self.model.elite_model_idxes = elite_idx[:self.model.num_elite]
         return eval_mse_losses.detach().cpu().numpy(), None
-
-    @torch.no_grad()
-    def select_elite_models(self, data):
-        obs_list, action_list, next_obs_list, reward_list = \
-            itemgetter("obs",'action','next_obs', 'reward')(data)
-        
-        delta_obs_list = next_obs_list - obs_list
-        obs_list, action_list = self.transform_obs_action(obs_list, action_list)
-        model_input = torch.cat([obs_list, action_list], dim=-1)
-
-        predictions = self.model.predict(model_input)
-        groundtruths = torch.cat((delta_obs_list, reward_list), dim=1)
-        eval_mse_losses, _  = self.model_loss(predictions, groundtruths, mse_only=True)
-        idx = np.argsort(eval_mse_losses.cpu().numpy())
-        self.model.elite_model_idxes = idx[:self.model.num_elite]
         
     def reset_normalizers(self):
         self.obs_normalizer.reset()
@@ -137,11 +124,11 @@ class TransitionModel:
         predictions = self.model.predict(model_input)
         #compute training loss
         groundtruths = torch.cat((delta_obs_batch, reward_batch), dim=-1)
-        train_mean_losses, train_var_losses = self.model_loss(predictions, groundtruths)
-        train_mean_loss = torch.sum(train_mean_losses)
+        train_mse_losses, train_var_losses = self.model_loss(predictions, groundtruths)
+        train_mse_loss = torch.sum(train_mse_losses)
         train_var_loss = torch.sum(train_var_losses)
-        train_transition_loss = train_mean_loss + train_var_loss
-        train_transition_loss += 0.01 * torch.sum(self.model.max_std) - 0.01 * torch.sum(self.model.min_std) # why
+        train_transition_loss = train_mse_loss + train_var_loss
+        train_transition_loss += 0.01 * torch.sum(self.model.max_logvar) - 0.01 * torch.sum(self.model.min_logvar) # why
         if self.use_weight_decay:
             decay_loss = self.model.get_decay_loss()
             train_transition_loss += decay_loss
@@ -155,29 +142,30 @@ class TransitionModel:
         #compute testing loss for elite model
         
         return {
-            "loss/train_transition_loss_mean": train_mean_loss.item()/self.model.ensemble_size,
+            "loss/train_transition_loss_mse": train_mse_loss.item()/self.model.ensemble_size,
             "loss/train_transition_loss_var": train_var_loss.item()/self.model.ensemble_size,
             "loss/train_transition_loss": train_var_loss.item()/self.model.ensemble_size,
             "loss/decay_loss": decay_loss.item() if decay_loss is not None else 0,
-            "misc/max_std_mean": self.model.max_std.mean().item(),
-            "misc/max_std_var": self.model.max_std.var().item(),
-            "misc/min_std_mean": self.model.min_std.mean().item(),
-            "misc/max_std_var": self.model.min_std.var().item()
+            "misc/max_std_mean": self.model.max_logvar.mean().item(),
+            "misc/max_std_var": self.model.max_logvar.var().item(),
+            "misc/min_std_mean": self.model.min_logvar.mean().item(),
+            "misc/max_std_var": self.model.min_logvar.var().item(),
+            "misc/mean_std": predictions[1].exp().sqrt().mean().item()
         }
 
     def model_loss(self, predictions, groundtruths, mse_only=False):
-        pred_means, pred_stds = predictions
+        pred_means, pred_logvars = predictions
         if self.inc_var_loss and not mse_only:
             # Average over batch and dim, sum over ensembles.
-            inv_var = torch.exp(-pred_stds)
-            mean_losses = torch.mean(torch.mean(torch.pow(pred_means - groundtruths, 2) * inv_var, dim=-1), dim=-1)
-            var_losses = torch.mean(torch.mean(pred_stds, dim=-1), dim=-1)
+            inv_var = torch.exp(-pred_logvars)
+            mse_losses = torch.mean(torch.mean(torch.pow(pred_means - groundtruths, 2) * inv_var, dim=-1), dim=-1)
+            var_losses = torch.mean(torch.mean(pred_logvars, dim=-1), dim=-1)
         elif mse_only:
-            mean_losses = torch.mean(torch.pow(pred_means - groundtruths, 2), dim=(1, 2))
+            mse_losses = torch.mean(torch.pow(pred_means - groundtruths, 2), dim=(1, 2))
             var_losses = None
         else:
             assert 0
-        return mean_losses, var_losses
+        return mse_losses, var_losses
 
     @torch.no_grad()  
     def predict(self, obs, act, deterministic=False):
@@ -192,26 +180,26 @@ class TransitionModel:
         scaled_obs, scaled_act = self.transform_obs_action(obs, act)
         
         model_input = torch.cat([scaled_obs, scaled_act], dim=-1)
-        pred_means, pred_stds = self.model.predict(model_input)
-        pred_means = pred_means.detach().cpu().numpy()
+        pred_diff_means, pred_diff_logvars = self.model.predict(model_input)
+        pred_diff_means = pred_diff_means.detach().cpu().numpy()
         #add curr obs for next obs
         obs = obs.detach().cpu().numpy()
         act = act.detach().cpu().numpy()
-        ensemble_model_stds = pred_stds.exp().sqrt().detach().cpu().numpy()
+        ensemble_model_stds = pred_diff_logvars.exp().sqrt().detach().cpu().numpy()
         if deterministic:
-            pred_means = pred_means
+            pred_diff_means = pred_diff_means
         else:
-            pred_means = pred_means + np.random.normal(size=pred_means.shape) * ensemble_model_stds
+            pred_diff_means = pred_diff_means + np.random.normal(size=pred_diff_means.shape) * ensemble_model_stds
 
-        num_models, batch_size, _ = pred_means.shape
+        num_models, batch_size, _ = pred_diff_means.shape
         model_idxes = np.random.choice(self.model.elite_model_idxes, size=batch_size)
         batch_idxes = np.arange(0, batch_size)
 
-        pred_samples = pred_means[model_idxes, batch_idxes]
+        pred_diff_samples = pred_diff_means[model_idxes, batch_idxes]
         # model_means = pred_means[model_idxes, batch_idxes]
         # model_stds = ensemble_model_stds[model_idxes, batch_idxes]
 
-        next_obs, rewards = pred_samples[:, :-1] + obs, pred_samples[:, -1]
+        next_obs, rewards = pred_diff_samples[:, :-1] + obs, pred_diff_samples[:, -1]
         #next_obs = np.clip(next_obs, self.obs_space.low, self.obs_space.high)
         terminals = self._termination_fn(self.env_name, obs, act, next_obs)
 

@@ -103,6 +103,9 @@ class MBPOTrainer(BaseTrainer):
         loss_dict = {}
         obs = self.env.reset()
         done = False
+        log_dict = self.test()
+        for log_key in log_dict:
+            util.logger.log_var(log_key, log_dict[log_key], self.tot_env_steps)
         util.logger.log_str("Started Training")
         for epoch in trange(self.max_epoch, colour='blue', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
             
@@ -224,15 +227,15 @@ class MBPOTrainer(BaseTrainer):
                 model_train_iters += 1
                 self.model_tot_train_timesteps += 1
             
-            model_train_epochs += 1
 
-            eval_mse_losses, _ = self.transition_model.eval_data(eval_data)
-            util.logger.log_var("model/mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
+
+            eval_mse_losses, _ = self.transition_model.eval_data(eval_data, update_elite_models=False)
+            util.logger.log_var("loss/model_eval_mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
             updated = self.transition_model.update_best_snapshots(eval_mse_losses)
+            num_epochs_since_prev_best += 1
             if updated > 0.01:
+                model_train_epochs += num_epochs_since_prev_best
                 num_epochs_since_prev_best = 0
-            else:
-                num_epochs_since_prev_best += 1
             if num_epochs_since_prev_best >= self.max_model_update_epochs_to_improve:
                 break
         self.transition_model.load_best_snapshots()
@@ -240,13 +243,13 @@ class MBPOTrainer(BaseTrainer):
 
 
         # evaluate data to update the elite models
-        self.transition_model.select_elite_models(eval_data)
+        self.transition_model.eval_data(eval_data, update_elite_models=True)
         model_loss_dict['misc/norm_obs_mean'] = torch.mean(self.transition_model.obs_normalizer.mean).item()
         model_loss_dict['misc/norm_obs_var'] = torch.mean(self.transition_model.obs_normalizer.var).item()
         model_loss_dict['misc/norm_act_mean'] = torch.mean(self.transition_model.act_normalizer.mean).item()
         model_loss_dict['misc/norm_act_var'] = torch.mean(self.transition_model.act_normalizer.var).item()
-        model_loss_dict['model/num_epochs'] = model_train_epochs
-        model_loss_dict['model/num_train_steps'] = model_train_iters
+        model_loss_dict['misc/model_train_epochs'] = model_train_epochs
+        model_loss_dict['misc/model_train_train_steps'] = model_train_iters
         return model_loss_dict
 
     def resize_model_buffer(self, rollout_length):
@@ -288,28 +291,3 @@ class MBPOTrainer(BaseTrainer):
         data_batch = functional.merge_data_batch(model_data_batch, env_data_batch)
         loss_dict = self.agent.update(data_batch)
         return loss_dict
-
-            
-    @torch.no_grad()
-    def test(self):
-        rewards = []
-        lengths = []
-        for episode in range(self.num_test_trajectories):
-            traj_reward = 0
-            traj_length = 0
-            state = self.eval_env.reset()
-            for step in range(self.max_trajectory_length):
-                action, _ = self.agent.select_action(state, deterministic=True)
-                next_state, reward, done, _ = self.eval_env.step(action)
-                traj_reward += reward
-                state = next_state
-                traj_length += 1 
-                if done:
-                    break
-            lengths.append(traj_length)
-            rewards.append(traj_reward)
-        return {
-            "return/test": np.mean(rewards),
-            "length/test": np.mean(lengths)
-        }
-

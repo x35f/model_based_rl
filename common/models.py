@@ -25,8 +25,8 @@ class EnsembleModel(nn.Module):
         self.ensemble_size = ensemble_size
         self.decay_weights = decay_weights
         self.elite_model_idxes = torch.tensor([i for i in range(num_elite)])
-        self.max_std = nn.Parameter((torch.ones((1, self.out_dim)).float() / 2).to(device), requires_grad=True)
-        self.min_std = nn.Parameter((-torch.ones((1, self.out_dim)).float() * 10).to(device), requires_grad=True)
+        self.max_logvar = nn.Parameter((torch.ones((1, self.out_dim)).float() / 2).to(device), requires_grad=True)
+        self.min_logvar = nn.Parameter((-torch.ones((1, self.out_dim)).float() * 10).to(device), requires_grad=True)
         
         self.to(device)
 
@@ -46,11 +46,11 @@ class EnsembleModel(nn.Module):
         predictions =  torch.stack(model_outputs)
 
         mean = predictions[:, :, :self.out_dim]
-        std = predictions[:, :, self.out_dim:]
-        std = self.max_std - F.softplus(self.max_std - std)
-        std = self.min_std + F.softplus(std - self.min_std)
+        logvar = predictions[:, :, self.out_dim:]
+        logvar = self.max_logvar - F.softplus(self.max_logvar - logvar)
+        logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
         
-        return mean, std
+        return mean, logvar
     
     def get_decay_loss(self):
         decay_losses = []

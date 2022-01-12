@@ -1,0 +1,17 @@
+{
+  "env_name": "InvertedPendulum-v2",
+  "trainer": {
+    "max_epoch": 80,
+    "rollout_step_scheduler":{
+      "initial_val": 1,
+      "target_val": 1,
+      "start_timestep": 0,
+      "end_timestep": 80,
+      "schedule_type": "identical"
+    },
+    "num_env_steps_per_epoch": 250,
+    "start_train_model_timestep": 500,
+    "start_train_agent_timestep": 500,
+    "num_agent_updates_per_env_step": 10
+  }
+}
