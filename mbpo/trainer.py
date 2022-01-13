@@ -109,7 +109,7 @@ class MBPOTrainer(BaseTrainer):
 
             for env_step in trange(self.num_env_steps_per_epoch, colour='green', desc='inner loop'):
 
-                self.pre_ite()
+                self.pre_iter()
                 log_infos = {}
 
                 action = self.agent.select_action(obs)['action']
@@ -155,7 +155,7 @@ class MBPOTrainer(BaseTrainer):
                 log_infos["misc/utd_ratio"] = tot_agent_update_steps / tot_env_steps
                 log_infos["misc/tot_agent_update_steps"] = tot_agent_update_steps
 
-                self.post_ite(log_infos, tot_env_steps)         
+                self.post_iter(log_infos, tot_env_steps)         
 
             epoch_end_time = time()
             epoch_duration = epoch_end_time - epoch_start_time
