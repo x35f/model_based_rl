@@ -10,6 +10,7 @@
     "gamma": 0.99,
     "target_smoothing_tau": 0.005,
     "alpha": 0.2,
+    "reward_scale": 1.0,
     "q_network":{
       "hidden_dims": [256,256],
       "optimizer_class": "Adam",
@@ -28,6 +29,7 @@
     },
     "entropy":{
       "automatic_tuning": true,
+      "target_entropy": -1,
       "learning_rate": 0.0003,
       "optimizer_class": "Adam"
     }
@@ -38,7 +40,7 @@
     "use_weight_decay": true,
     "optimizer_class": "Adam",
     "learning_rate":0.001,
-    "holdout_ratio": 0.1,
+    "holdout_ratio": 0.2,
     "inc_var_loss": true,
     "model":{
       "hidden_dims": [200, 200, 200, 200],
@@ -66,19 +68,16 @@
     "train_model_interval": 250,
     "train_agent_interval": 1,
     "max_trajectory_length":1000,
-    "test_interval": 1,
-    "num_test_trajectories": 5,
-    "save_model_interval": 2000,
-    "start_train_model_timestep": 5000,
-    "start_train_agent_timestep": 1000,
-    "save_video_demo_interval": 1,
-    "log_interval": 1,
+    "eval_interval": 1000,
+    "num_eval_trajectories": 10,
+    "snapshot_interval": 2000,
+    "warmup_timesteps": 5000,
+    "save_video_demo_interval": 2000,
+    "log_interval": 250,
     "model_env_ratio": 0.95,
-    "num_model_rollouts": 400,
     "num_agent_updates_per_env_step": 20,
-    "max_agent_updates_per_env_step": 5,
     "max_model_update_epochs_to_improve": 5,
-    "train_log_interval":50
+    "max_model_train_iterations": "None"
   }
   
 }

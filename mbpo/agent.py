@@ -1,3 +1,4 @@
+from numpy.lib.arraysetops import isin
 import torch
 import torch.nn.functional as F
 import os
@@ -11,6 +12,7 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
     def __init__(self,observation_space, action_space, env_name,
         target_smoothing_tau=0.1,
         alpha=0.2,
+        reward_scale=1.,
         **kwargs):
         obs_dim = observation_space.shape[0]
         action_dim = action_space.shape[0]
@@ -52,13 +54,20 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         #hyper-parameters
         self.gamma = kwargs['gamma']
         self.automatic_entropy_tuning = kwargs['entropy']['automatic_tuning']
+        target_entropy = kwargs['entropy']['target_entropy']
         self.alpha = alpha
         if self.automatic_entropy_tuning is True:
-            self.target_entropy = -np.prod(action_space.shape).item()
+            if target_entropy == 'auto':
+                self.target_entropy = -np.prod(action_space.shape).item()
+            else:
+                assert isinstance(target_entropy, int) or isinstance(target_entropy, float)
+                self.target_entropy = target_entropy
+
             self.log_alpha = torch.zeros(1, requires_grad=True, device=util.device)
             self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=kwargs['entropy']['learning_rate'])
         self.tot_update_count = 0 
         self.target_smoothing_tau = target_smoothing_tau
+        self.reward_scale = reward_scale
 
 
     def update(self, data_batch):
@@ -68,6 +77,8 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
         reward_batch = data_batch['reward']
         done_batch = data_batch['done']
         
+        reward_batch = reward_batch * self.reward_scale
+
         curr_state_q1_value = self.q1_network(torch.cat([obs_batch, action_batch],dim=1))
         curr_state_q2_value = self.q2_network(torch.cat([obs_batch, action_batch],dim=1))
         next_state_action, next_state_log_pi = \
@@ -134,15 +145,8 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
             "loss/policy": policy_loss_value, 
             "loss/entropy": alpha_loss_value, 
             "misc/entropy_alpha": alpha_value, 
-            "misc/obs_mean": torch.mean(obs_batch).item(),
-            "misc/obs_var": torch.var(obs_batch).item(),
-            "misc/current_state_q1_mean": torch.mean(curr_state_q1_value).item(), 
-            "misc/current_state_q2_mean": torch.mean(curr_state_q2_value).item(),
             "misc/train_reward_mean": torch.mean(reward_batch).item(),
-            "misc/current_state_q1_var": torch.var(curr_state_q1_value).item(), 
-            "misc/current_state_q2_var": torch.var(curr_state_q2_value).item(),
-            "misc/train_reward_var": torch.var(reward_batch).item(),
-            "misc/q_diff": torch.norm((curr_state_q2_value-curr_state_q1_value).squeeze().detach().clone().cpu(), p=1) / len(curr_state_q1_value.squeeze())
+            "misc/train_reward_var": torch.var(reward_batch).item()
         }
         
 
@@ -162,7 +166,10 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
                 itemgetter("action_scaled", "log_prob")(self.policy_network.sample(obs, deterministic))
         if len(obs.shape) == 1:
             action_scaled = action_scaled.squeeze()
-        return action_scaled.detach().cpu().numpy(), log_prob.detach().cpu().numpy()
+        return {
+            "action": action_scaled.detach().cpu().numpy(), 
+            "log_prob": log_prob.detach().cpu().numpy()
+        }
 
 
     

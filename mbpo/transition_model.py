@@ -139,18 +139,15 @@ class TransitionModel:
         train_transition_loss.backward()
         self.model_optimizer.step()
 
-        #compute testing loss for elite model
+        #compute test loss for elite model
         
         return {
-            "loss/train_transition_loss_mse": train_mse_loss.item()/self.model.ensemble_size,
-            "loss/train_transition_loss_var": train_var_loss.item()/self.model.ensemble_size,
-            "loss/train_transition_loss": train_var_loss.item()/self.model.ensemble_size,
+            "loss/train_model_loss_mse": train_mse_loss.item(),
+            "loss/train_model_loss_var": train_var_loss.item(),
+            "loss/train_model_loss": train_var_loss.item(),
             "loss/decay_loss": decay_loss.item() if decay_loss is not None else 0,
-            "misc/max_std_mean": self.model.max_logvar.mean().item(),
-            "misc/max_std_var": self.model.max_logvar.var().item(),
-            "misc/min_std_mean": self.model.min_logvar.mean().item(),
-            "misc/max_std_var": self.model.min_logvar.var().item(),
-            "misc/mean_std": predictions[1].exp().sqrt().mean().item()
+            "misc/max_std": self.model.max_logvar.mean().item(),
+            "misc/min_std": self.model.min_logvar.mean().item()
         }
 
     def model_loss(self, predictions, groundtruths, mse_only=False):
@@ -196,21 +193,14 @@ class TransitionModel:
         batch_idxes = np.arange(0, batch_size)
 
         pred_diff_samples = pred_diff_means[model_idxes, batch_idxes]
-        # model_means = pred_means[model_idxes, batch_idxes]
-        # model_stds = ensemble_model_stds[model_idxes, batch_idxes]
 
         next_obs, rewards = pred_diff_samples[:, :-1] + obs, pred_diff_samples[:, -1]
-        #next_obs = np.clip(next_obs, self.obs_space.low, self.obs_space.high)
         terminals = self._termination_fn(self.env_name, obs, act, next_obs)
 
-        # batch_size = model_means.shape[0]
-        # return_means = np.concatenate((model_means[:, :-1], terminals[:,None], model_means[:, -1:]), axis=-1)
-        # return_stds = np.concatenate((model_stds[:, :-1], np.zeros((batch_size, 1)), model_stds[:, -1:]), axis=-1)
 
         assert(type(next_obs) == np.ndarray)
 
-        info = {}#'mean': return_means, 'std': return_stds}
-        return next_obs, rewards, terminals, info
+        return next_obs, rewards, terminals
 
     def update_best_snapshots(self, val_losses):
         updated = False

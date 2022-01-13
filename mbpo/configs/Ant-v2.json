@@ -1,0 +1,18 @@
+{
+  "env_name": "Ant-v2",
+  "trainer": {
+    "max_epoch": 200
+  },
+  "rollout_step_scheduler":{
+    "initial_val": 1,
+    "target_val": 25,
+    "start_timestep": 20,
+    "end_timestep": 100,
+    "schedule_type": "linear"
+  },
+  "agent": {
+    "entropy": {
+      "target_entropy": -4
+    }
+  }
+}

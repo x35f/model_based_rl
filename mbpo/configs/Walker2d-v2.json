@@ -8,6 +8,12 @@
       "target_val": 1,
       "schedule_type": "identical"
     }
+  },
+  "agent": {
+    "entropy": {
+      "automatic_tuning": true,
+      "target_entropy": -3
+    }
   }
 }
 
