@@ -89,8 +89,7 @@ class TransitionModel:
         delta_obs_list = next_obs_list - obs_list
         obs_list, action_list = self.transform_obs_action(obs_list, action_list)
         model_input = torch.cat([obs_list, action_list], dim=-1)
-
-        predictions = functional.minibatch_inference(args=[model_input],rollout_fn=self.model.predict, batch_size=10000) # the inference size grows as model buffer increases
+        predictions = functional.minibatch_inference(args=[model_input],rollout_fn=self.model.predict, batch_size=10000, cat_dim=1) # the inference size grows as model buffer increases
         groundtruths = torch.cat((delta_obs_list, reward_list), dim=1)
         eval_mse_losses, _  = self.model_loss(predictions, groundtruths, mse_only=True)
         if update_elite_models:
@@ -112,7 +111,7 @@ class TransitionModel:
         return obs, action
 
     def update(self, data_batch):
-
+        return {}
         obs_batch, action_batch, next_obs_batch, reward_batch = \
             itemgetter("obs",'action','next_obs', 'reward')(data_batch)
 

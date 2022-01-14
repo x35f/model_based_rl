@@ -191,6 +191,7 @@ class MBPOTrainer(BaseTrainer):
             eval_mse_losses, _ = self.transition_model.eval_data(eval_data, update_elite_models=False)
             util.logger.log_var("loss/model_eval_mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
             updated = self.transition_model.update_best_snapshots(eval_mse_losses)
+            updated = 0.0
             num_epochs_since_prev_best += 1
             if updated > 0.01:
                 model_train_epochs += num_epochs_since_prev_best
