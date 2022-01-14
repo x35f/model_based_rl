@@ -1,10 +1,7 @@
 
 #implement model to learn state transitions and rewards
 import torch
-from unstable_baselines.common.networks import get_network, get_act_cls, EnsembleMLPNetwork
 import torch.nn as nn
-from abc import abstractmethod
-import numpy as np
 import torch.nn.functional as F
 from unstable_baselines.common import util 
 from unstable_baselines.common.networks import MLPNetwork

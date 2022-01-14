@@ -111,7 +111,6 @@ class TransitionModel:
         return obs, action
 
     def update(self, data_batch):
-        return {}
         obs_batch, action_batch, next_obs_batch, reward_batch = \
             itemgetter("obs",'action','next_obs', 'reward')(data_batch)
 
