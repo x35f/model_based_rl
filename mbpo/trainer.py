@@ -65,13 +65,12 @@ class MBPOTrainer(BaseTrainer):
     def warmup(self):
         obs = self.train_env.reset()
         for step in tqdm(range(self.warmup_timesteps)):
-            action = self.agent.select_action(obs)['action']
+            action = self.train_env.action_space.sample()
             next_obs, reward, done, info = self.train_env.step(action)
             self.env_buffer.add_transition(obs, action, next_obs, reward, float(done))
             obs = next_obs
             if done:
                 obs = self.train_env.reset()
-
 
 
     def train(self):
