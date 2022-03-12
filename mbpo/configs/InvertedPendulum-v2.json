@@ -3,7 +3,7 @@
   "trainer": {
     "max_epoch": 80,
     "eval_interval": 250,
-    "save_video_demo_interval": 1000,
+    "save_video_demo_interval": -1,
     "num_env_steps_per_epoch": 250,
     "warmup_timesteps": 500,
     "num_agent_updates_per_env_step": 10,

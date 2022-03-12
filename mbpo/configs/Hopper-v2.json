@@ -2,6 +2,7 @@
   "env_name": "Hopper-v2",
   "trainer": {
     "max_epoch": 125,
+    "num_agent_updates_per_env_step": 20,
     "rollout_step_scheduler":{
       "initial_val": 1,
       "target_val": 15,
