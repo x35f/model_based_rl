@@ -75,6 +75,15 @@ class TransitionModel:
             notdone = np.isfinite(next_obs).all(axis=-1) \
                     * (np.abs(next_obs[:,1]) <= .2)
             done = ~notdone
+        elif env_name == "Ant-v2":
+            x = next_obs[:, 0]
+            not_done = 	np.isfinite(next_obs).all(axis=-1) \
+                        * (x >= 0.2) \
+                        * (x <= 1.0)
+
+            done = ~not_done
+            done = done[:,None]
+            return done
         elif "Swimmer" in env_name or "HalfCheetah" in env_name: # No done for these two envs
             return np.array([False for _ in obs])
         else:

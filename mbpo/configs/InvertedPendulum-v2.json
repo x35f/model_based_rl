@@ -1,7 +1,7 @@
 {
   "env_name": "InvertedPendulum-v2",
   "trainer": {
-    "max_epoch": 60,
+    "max_epoch": 80,
     "eval_interval": 250,
     "save_video_demo_interval": 1000,
     "num_env_steps_per_epoch": 250,

@@ -116,6 +116,8 @@ class MBPOTrainer(BaseTrainer):
                 tot_env_steps += 1
                 traj_length  += 1
                 traj_return += reward
+                if traj_length >= self.max_trajectory_length:
+                    done = False
                 self.env_buffer.add_transition(obs, action, next_obs, reward, float(done))
                 obs = next_obs
                 if done or traj_length >= self.max_trajectory_length:
@@ -190,9 +192,8 @@ class MBPOTrainer(BaseTrainer):
             eval_mse_losses, _ = self.transition_model.eval_data(eval_data, update_elite_models=False)
             util.logger.log_var("loss/model_eval_mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
             updated = self.transition_model.update_best_snapshots(eval_mse_losses)
-            updated = 0.0
             num_epochs_since_prev_best += 1
-            if updated > 0.01:
+            if updated == True:
                 model_train_epochs += num_epochs_since_prev_best
                 num_epochs_since_prev_best = 0
             if num_epochs_since_prev_best >= self.max_model_update_epochs_to_improve or model_train_iters > self.max_model_train_iterations:

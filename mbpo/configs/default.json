@@ -4,7 +4,7 @@
     "max_buffer_size": 1000000
   },
   "model_buffer":{
-    "max_buffer_size": 400000
+    "max_buffer_size": 2000000
   },
   "agent":{
     "gamma": 0.99,
@@ -53,9 +53,9 @@
   },
   "rollout_step_scheduler":{
     "initial_val": 1,
-    "target_val": 15,
+    "target_val": 1,
     "start_timestep": 20,
-    "end_timestep": 100,
+    "end_timestep": 150,
     "schedule_type": "linear"
   },
   "trainer":{
@@ -75,7 +75,7 @@
     "save_video_demo_interval": 2000,
     "log_interval": 250,
     "model_env_ratio": 0.95,
-    "num_agent_updates_per_env_step": 20,
+    "num_agent_updates_per_env_step": 2,
     "max_model_update_epochs_to_improve": 5,
     "max_model_train_iterations": "None"
   }

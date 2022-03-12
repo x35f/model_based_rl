@@ -1,7 +1,7 @@
 {
   "env_name": "Humanoid-v2",
   "trainer": {
-    "max_epoch": 500,
+    "max_epoch": 300,
     "model_retain_epochs": 5
   },
   "rollout_step_scheduler":{
