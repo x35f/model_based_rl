@@ -4,9 +4,9 @@
 * [When to Trust Your Model: Model-Based Policy Optimization](https://proceedings.neurips.cc/paper/9416-when-to-trust-your-model-model-based-policy-optimization.pdf) (MBPO)
 
 ## Results
-* The Tensorboard logs of some experimental runs has been included in the ``result`` directory.
+* The Tensorboard logs of some experimental runs has been included in the ``results`` directory.
 * Test Machine Information
-	** Ubuntu 20.04
-	** Intel I9-12900KF
-	** NVIDIA RTX 3080
-	** Crucial DDR5 96 
+	* Ubuntu 20.04
+	* Intel I9-12900KF
+	* NVIDIA RTX 3080
+	* Crucial DDR5 96 GigaBytes
