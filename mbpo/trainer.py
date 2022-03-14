@@ -183,6 +183,9 @@ class MBPOTrainer(BaseTrainer):
         num_epochs_since_prev_best = 0
         break_training = False
         self.transition_model.reset_best_snapshots()
+        eval_mse_losses, _ = self.transition_model.eval_data(eval_data, update_elite_models=False)
+        util.logger.log_var("loss/model_eval_mse_loss", eval_mse_losses.mean(), self.model_tot_train_timesteps)
+        updated = self.transition_model.update_best_snapshots(eval_mse_losses)
         while not break_training:
             for train_data_batch in dict_batch_generator(train_data, self.model_batch_size):
                 model_log_infos= self.transition_model.update(train_data_batch)

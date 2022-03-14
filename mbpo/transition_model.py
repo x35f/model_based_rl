@@ -225,7 +225,7 @@ class TransitionModel:
         return updated
 
     def reset_best_snapshots(self):
-        self.model_best_snapshots = [None for _ in range(self.model.ensemble_size)]
+        self.model_best_snapshots = [self.model.ensemble_models[idx].state_dict() for idx in range(self.model.ensemble_size)]
         self.best_snapshot_losses = [1e10 for _ in range(self.model.ensemble_size)]
 
     def save_model_snapshot(self, idx):
