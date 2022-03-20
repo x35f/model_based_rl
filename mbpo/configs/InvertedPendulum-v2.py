@@ -1,4 +1,4 @@
-{
+overwrite_args = {
   "env_name": "InvertedPendulum-v2",
   "trainer": {
     "max_epoch": 80,
@@ -16,7 +16,7 @@
   },
   "agent": {
     "entropy": {
-      "automatic_tuning": true,
+      "automatic_tuning": True,
       "target_entropy": -0.05
     }
   }

@@ -1,4 +1,4 @@
-{
+overwrite_args = {
   "env_name": "Ant-v2",
   "trainer": {
     "num_agent_updates_per_env_step": 20,

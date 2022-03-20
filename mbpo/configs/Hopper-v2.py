@@ -1,4 +1,4 @@
-{
+overwrite_args = {
   "env_name": "Hopper-v2",
   "trainer": {
     "max_epoch": 125,

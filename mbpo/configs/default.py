@@ -1,4 +1,4 @@
-{
+default_args = {
   "env_name": "",
   "env_buffer":{
     "max_buffer_size": 1000000
@@ -21,14 +21,14 @@
     "policy_network":{
       "hidden_dims": [256,256],
       "optimizer_class": "Adam",
-      "deterministic": false,
+      "deterministic": False,
       "learning_rate":0.0003,
       "act_fn": "relu",
       "out_act_fn": "identity",
-      "re_parameterize": true
+      "re_parameterize": True
     },
     "entropy":{
-      "automatic_tuning": true,
+      "automatic_tuning": True,
       "target_entropy": -1,
       "learning_rate": 0.0003,
       "optimizer_class": "Adam"
@@ -37,11 +37,11 @@
 
   "transition_model":{
     "model_batch_size": 256,
-    "use_weight_decay": true,
+    "use_weight_decay": True,
     "optimizer_class": "Adam",
     "learning_rate":0.001,
     "holdout_ratio": 0.2,
-    "inc_var_loss": true,
+    "inc_var_loss": True,
     "model":{
       "hidden_dims": [200, 200, 200, 200],
       "decay_weights": [0.000025, 0.00005, 0.000075, 0.000075, 0.0001],

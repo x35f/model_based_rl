@@ -1,8 +1,8 @@
-{
-  "env_name": "HalfCheetah-v2",
+overwrite_args = {
+  "env_name": "Walker2d-v2",
   "trainer": {
-    "max_epoch": 400,
-    "num_agent_updates_per_env_step": 40,
+    "max_epoch": 300,
+    "num_agent_updates_per_env_step": 20,
     "rollout_step_scheduler":{
       "initial_val": 1,
       "target_val": 1,
@@ -11,8 +11,9 @@
   },
   "agent": {
     "entropy": {
-      "automatic_tuning": true,
+      "automatic_tuning": True,
       "target_entropy": -3
     }
   }
 }
+
