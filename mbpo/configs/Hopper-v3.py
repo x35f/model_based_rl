@@ -1,5 +1,5 @@
 overwrite_args = {
-  "env_name": "Hopper-v2",
+  "env_name": "Hopper-v3",
   "trainer": {
     "max_epoch": 125,
     "num_agent_updates_per_env_step": 20,

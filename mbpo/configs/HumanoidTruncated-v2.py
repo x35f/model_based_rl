@@ -1,7 +1,10 @@
 overwrite_args = {
-  "env_name": "Humanoid-v2",
+  "env_name": "HumanoidTruncatedObs-v2",
   "trainer": {
+
+    "train_model_interval": 1000,
     "max_epoch": 300,
+    "num_agent_updates_per_env_step": 20,
     "model_retain_epochs": 5
   },
   "rollout_step_scheduler":{

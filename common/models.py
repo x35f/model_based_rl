@@ -24,7 +24,8 @@ class EnsembleModel(nn.Module):
         self.elite_model_idxes = torch.tensor([i for i in range(num_elite)])
         self.max_logvar = nn.Parameter((torch.ones((1, self.out_dim)).float() / 2).to(device), requires_grad=True)
         self.min_logvar = nn.Parameter((-torch.ones((1, self.out_dim)).float() * 10).to(device), requires_grad=True)
-        
+        self.register_parameter("max_logvar", self.max_logvar)
+        self.register_parameter("min_logvar", self.min_logvar)
         self.to(device)
 
     
@@ -44,7 +45,7 @@ class EnsembleModel(nn.Module):
 
         mean = predictions[:, :, :self.out_dim]
         logvar = predictions[:, :, self.out_dim:]
-        logvar = self.max_logvar - F.softplus(self.max_logvar - logvar)
+        logvar = self.max_logvar - F.softplus(self.max_logvar- logvar)
         logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
         
         return mean, logvar
