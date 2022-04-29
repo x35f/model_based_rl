@@ -59,7 +59,7 @@ class MBPOTrainer(BaseTrainer):
         self.model_env_ratio = model_env_ratio
         self.hold_out_ratio = hold_out_ratio
         if load_dir != "":
-            self.agent.load(load_dir)
+            self.agent.load_snapshot(load_dir)
         self.model_tot_train_timesteps = 0
 
     def warmup(self):

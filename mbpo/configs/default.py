@@ -4,7 +4,7 @@ default_args = {
     "max_buffer_size": 1000000
   },
   "model_buffer":{
-    "max_buffer_size": 400000
+    "max_buffer_size": 2000000
   },
   "agent":{
     "gamma": 0.99,

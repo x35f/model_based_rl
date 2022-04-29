@@ -35,7 +35,7 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
 
     #initialize logger
     env_name = args['env_name']
-    logger = Logger(log_dir, env_name, prefix = info, print_to_terminal=print_log)
+    logger = Logger(log_dir, env_name,seed=seed, info_str=info, print_to_terminal=print_log)
     logger.log_str("logging to {}".format(logger.log_path))
 
     #set device and logger
@@ -47,11 +47,13 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
     #initialize environment
     logger.log_str("Initializing Environment")
     env = get_env(env_name)
-    #env = BaseEnvWrapper(env, **args['env'])
     eval_env = get_env(env_name)
-    #eval_env = BaseEnvWrapper(eval_env, **args['env'])
     obs_space = env.observation_space
     action_space = env.action_space
+
+    env.seed(seed)
+    eval_env.seed(seed)
+    action_space.seed(seed)
 
     #initialize buffer
     logger.log_str("Initializing Buffer")
