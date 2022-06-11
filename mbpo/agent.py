@@ -164,12 +164,16 @@ class MBPOAgent(torch.nn.Module, BaseAgent):
 
         action_scaled, log_prob = \
                 itemgetter("action_scaled", "log_prob")(self.policy_network.sample(obs, deterministic))
-        if len(obs.shape) == 1:
-            action_scaled = action_scaled.squeeze()
-        return {
-            "action": action_scaled.detach().cpu().numpy(), 
-            "log_prob": log_prob.detach().cpu().numpy()
-        }
+        if obs.shape[0] == 1:
+            return {
+                "action": action_scaled.detach().cpu().numpy()[0], 
+                "log_prob": log_prob.detach().cpu().numpy()[0]
+            }
+        else:
+            return {
+                "action": action_scaled.detach().cpu().numpy(), 
+                "log_prob": log_prob.detach().cpu().numpy()
+            }
 
 
     

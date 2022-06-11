@@ -6,6 +6,8 @@ from unstable_baselines.common.networks import get_optimizer
 from unstable_baselines.model_based_rl.common.models import EnsembleModel
 from operator import itemgetter
 from unstable_baselines.common.normalizer import StandardNormalizer
+from copy import deepcopy
+
 class TransitionModel:
     def __init__(self, 
             obs_space, 
@@ -41,7 +43,7 @@ class TransitionModel:
 
     def _termination_fn(self, env_name, obs, act, next_obs):
         assert len(obs.shape) == len(next_obs.shape) == len(act.shape) == 2
-        if env_name == "Hopper-v2":
+        if env_name in ["Hopper-v2", "Hopper-v3"]:
             height = next_obs[:, 0]
             angle = next_obs[:, 1]
             not_done = np.isfinite(next_obs).all(axis=-1) \
@@ -225,11 +227,11 @@ class TransitionModel:
         return updated
 
     def reset_best_snapshots(self):
-        self.model_best_snapshots = [self.model.ensemble_models[idx].state_dict() for idx in range(self.model.ensemble_size)]
+        self.model_best_snapshots = [deepcopy(self.model.ensemble_models[idx].state_dict()) for idx in range(self.model.ensemble_size)]
         self.best_snapshot_losses = [1e10 for _ in range(self.model.ensemble_size)]
 
     def save_model_snapshot(self, idx):
-        self.model_best_snapshots[idx] = self.model.ensemble_models[idx].state_dict()
+        self.model_best_snapshots[idx] = deepcopy(self.model.ensemble_models[idx].state_dict())
 
     def load_best_snapshots(self):
         self.model.load_state_dicts(self.model_best_snapshots)

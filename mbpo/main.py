@@ -51,8 +51,8 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
     obs_space = env.observation_space
     action_space = env.action_space
 
-    env.seed(seed)
-    eval_env.seed(seed)
+    env.reset(seed=seed)
+    eval_env.reset(seed=seed)
     action_space.seed(seed)
 
     #initialize buffer
