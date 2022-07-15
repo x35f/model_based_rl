@@ -53,6 +53,7 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
 
     env.reset(seed=seed)
     eval_env.reset(seed=seed)
+    eval_env.action_space.seed(seed)
     action_space.seed(seed)
 
     #initialize buffer

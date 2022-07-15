@@ -8,15 +8,15 @@ import numpy as np
 from unstable_baselines.common import util, functional
 from operator import itemgetter
 
-class MBPOAgent(torch.nn.Module, BaseAgent):
+class MBPOAgent(BaseAgent):
     def __init__(self,observation_space, action_space, env_name,
         target_smoothing_tau=0.1,
         alpha=0.2,
         reward_scale=1.,
         **kwargs):
+        super(MBPOAgent, self).__init__()
         obs_dim = observation_space.shape[0]
         action_dim = action_space.shape[0]
-        super(MBPOAgent, self).__init__()
         #save parameters
         self.args = kwargs
         

@@ -28,7 +28,7 @@ class MBPOTrainer(BaseTrainer):
             warmup_timesteps=5000,
             model_env_ratio=0.8,
             hold_out_ratio=0.1,
-            load_dir="",
+            load_path="",
             **kwargs):
         super(MBPOTrainer, self).__init__(agent, train_env, eval_env, **kwargs)
         self.agent = agent
@@ -58,8 +58,8 @@ class MBPOTrainer(BaseTrainer):
         self.warmup_timesteps = warmup_timesteps
         self.model_env_ratio = model_env_ratio
         self.hold_out_ratio = hold_out_ratio
-        if load_dir != "":
-            self.agent.load_snapshot(load_dir)
+        if load_path != "":
+            self.agent.load_snapshot(load_path)
         self.model_tot_train_timesteps = 0
 
     def warmup(self):
@@ -103,6 +103,7 @@ class MBPOTrainer(BaseTrainer):
             new_model_rollout_steps = int(self.rollout_step_generator.next())
             if epoch == 0 or new_model_rollout_steps != model_rollout_steps:
                 self.resize_model_buffer(new_model_rollout_steps)
+                model_rollout_steps = new_model_rollout_steps
                 util.logger.log_var("model/model_buffer_size", self.model_buffer.max_buffer_size, tot_env_steps)
                 util.logger.log_var("model/rollout_step", new_model_rollout_steps, tot_env_steps)
 
@@ -156,6 +157,7 @@ class MBPOTrainer(BaseTrainer):
                 log_infos["misc/utd_ratio"] = tot_agent_update_steps / tot_env_steps
                 log_infos["misc/tot_agent_update_steps"] = tot_agent_update_steps
 
+                self.post_step(tot_env_steps)         
                 self.post_iter(log_infos, tot_env_steps)         
 
             epoch_end_time = time()
