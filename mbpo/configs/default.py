@@ -61,6 +61,7 @@ default_args = {
   "trainer":{
     "max_epoch": 125,
     "agent_batch_size": 256,
+    "model_batch_size": 256,
     "rollout_batch_size": 100000,
     "rollout_mini_batch_size": 10000,
     "model_retain_epochs": 1,
@@ -74,7 +75,9 @@ default_args = {
     "warmup_timesteps": 5000,
     "save_video_demo_interval": -1,
     "log_interval": 250,
+    "hold_out_ratio": 0.1,
     "model_env_ratio": 0.95,
+    "max_agent_updates_per_env_step": 1000,
     "num_agent_updates_per_env_step": 2,
     "max_model_update_epochs_to_improve": 5,
     "max_model_train_iterations": "None"

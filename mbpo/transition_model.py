@@ -13,9 +13,9 @@ class TransitionModel:
             obs_space, 
             action_space, 
             env_name, 
-            holdout_ratio=0.1, 
-            inc_var_loss=False, 
-            use_weight_decay=False,
+            holdout_ratio: float, 
+            inc_var_loss: bool, 
+            use_weight_decay: bool,
             **kwargs):
         
         obs_dim = obs_space.shape[0]

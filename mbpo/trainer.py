@@ -12,23 +12,23 @@ from unstable_baselines.common.functional import dict_batch_generator
 
 class MBPOTrainer(BaseTrainer):
     def __init__(self, agent, train_env, eval_env, transition_model, env_buffer, model_buffer, rollout_step_generator,
-            agent_batch_size=100,
-            model_batch_size=256,
-            rollout_batch_size=100000,
-            rollout_mini_batch_size=1000,
-            model_retain_epochs=1,
-            num_env_steps_per_epoch=1000,
-            train_model_interval=250,
-            train_agent_interval=1,
-            num_agent_updates_per_env_step=20, # G
-            max_epoch=100000,
-            max_agent_updates_per_env_step=5,
-            max_model_update_epochs_to_improve=5,
-            max_model_train_iterations="None",
-            warmup_timesteps=5000,
-            model_env_ratio=0.8,
-            hold_out_ratio=0.1,
-            load_path="",
+            load_path: str,
+            agent_batch_size: int,
+            model_batch_size: int,
+            rollout_batch_size: int,
+            rollout_mini_batch_size: int,
+            model_retain_epochs: int,
+            num_env_steps_per_epoch: int,
+            train_model_interval: int,
+            train_agent_interval: int,
+            num_agent_updates_per_env_step: int, # G
+            max_epoch: int,
+            max_agent_updates_per_env_step: int,
+            max_model_update_epochs_to_improve: int,
+            max_model_train_iterations: int,
+            warmup_timesteps: int,
+            model_env_ratio: float,
+            hold_out_ratio: float,
             **kwargs):
         super(MBPOTrainer, self).__init__(agent, train_env, eval_env, **kwargs)
         self.agent = agent
@@ -233,7 +233,7 @@ class MBPOTrainer(BaseTrainer):
             
             obs_minibatch = obs_batch[rollout_batch_id * self.rollout_mini_batch_size: min(len(obs_batch), (rollout_batch_id + 1) * self.rollout_mini_batch_size)]
             for rollout_step in range(model_rollout_steps):
-                action_minibatch = self.agent.select_action(obs_minibatch, deterministic=True)['action']
+                action_minibatch = self.agent.select_action(obs_minibatch)['action']
 
                 next_obs_minibatch, reward_minibatch, done_minibatch = self.transition_model.predict(obs_minibatch, action_minibatch)
                 done_minibatch = [float(d) for d in done_minibatch]

@@ -24,8 +24,9 @@ from unstable_baselines.common import util
 @click.option("--print-log", type=bool, default=True)
 @click.option("--seed", type=int, default=30)
 @click.option("--info", type=str, default="")
+@click.option("--load-path", type=str, default="")
 @click.argument('args', nargs=-1)
-def main(config_path, log_dir, gpu, print_log, seed, info, args):
+def main(config_path, log_dir, gpu, print_log, seed, info, load_path, args):
     print(os.getcwd())
     #todo: add load and update parameters function
     args = load_config(config_path, args)
@@ -83,6 +84,7 @@ def main(config_path, log_dir, gpu, print_log, seed, info, args):
         env_buffer,
         model_buffer,
         rollout_step_generator,
+        load_path,
         **args['trainer']
     )
     

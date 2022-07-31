@@ -2,7 +2,7 @@ overwrite_args = {
   "env_name": "AntTruncatedObs-v2",
   "trainer": {
     "num_agent_updates_per_env_step": 20,
-    "max_epoch": 400
+    "max_epoch": 300
   },
   "rollout_step_scheduler":{
     "initial_val": 1,

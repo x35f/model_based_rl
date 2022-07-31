@@ -10,9 +10,9 @@ from operator import itemgetter
 
 class MBPOAgent(BaseAgent):
     def __init__(self,observation_space, action_space, env_name,
-        target_smoothing_tau=0.1,
-        alpha=0.2,
-        reward_scale=1.,
+        target_smoothing_tau: float,
+        alpha: float,
+        reward_scale: float,
         **kwargs):
         super(MBPOAgent, self).__init__()
         obs_dim = observation_space.shape[0]
