@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 import os
 from unstable_baselines.common.agents import BaseAgent
-from unstable_baselines.common.networks import MLPNetwork, PolicyNetworkFactory, get_optimizer
+from unstable_baselines.common.networks import BasicNetwork, PolicyNetworkFactory, get_optimizer
 import numpy as np
 from unstable_baselines.common import util, functional
 from operator import itemgetter
@@ -21,11 +21,11 @@ class MBPOAgent(BaseAgent):
         self.args = kwargs
         
         #initilze networks
-        self.q1_network = MLPNetwork(obs_dim + action_dim, 1, **kwargs['q_network'])
-        self.q2_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
-        self.target_q1_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
-        self.target_q2_network = MLPNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
-        self.policy_network = PolicyNetworkFactory.get(obs_dim, action_space,  ** kwargs['policy_network'])
+        self.q1_network = BasicNetwork(obs_dim + action_dim, 1, **kwargs['q_network'])
+        self.q2_network = BasicNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
+        self.target_q1_network = BasicNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
+        self.target_q2_network = BasicNetwork(obs_dim + action_dim, 1,**kwargs['q_network'])
+        self.policy_network = PolicyNetworkFactory.get(observation_space, action_space,  ** kwargs['policy_network'])
         
         #sync network parameters
         functional.soft_update_network(self.q1_network, self.target_q1_network, 1.0)
@@ -38,14 +38,6 @@ class MBPOAgent(BaseAgent):
         self.target_q2_network = self.target_q2_network.to(util.device)
         self.policy_network = self.policy_network.to(util.device)
         
-        self.networks = {
-            "q1": self.q1_network,
-            "q2": self.q2_network,
-            "target_q1": self.target_q1_network,
-            "target_q2": self.target_q2_network,
-            "policy": self.policy_network,
-        }
-
         #initialize optimizer
         self.q1_optimizer = get_optimizer(network = self.q1_network, **kwargs['q_network'])
         self.q2_optimizer = get_optimizer(network = self.q2_network, **kwargs['q_network'])
