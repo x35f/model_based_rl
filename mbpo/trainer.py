@@ -63,14 +63,16 @@ class MBPOTrainer(BaseTrainer):
         self.model_tot_train_timesteps = 0
 
     def warmup(self):
-        obs = self.train_env.reset()
+        obs, info = self.train_env.reset()
         for step in tqdm(range(self.warmup_timesteps)):
             action = self.train_env.action_space.sample()
-            next_obs, reward, done, info = self.train_env.step(action)
-            self.env_buffer.add_transition(obs, action, next_obs, reward, float(done))
+            #next_obs, reward, done, truncated, info = self.train_env.step(action)
+            next_obs, reward, done, truncated, info = self.train_env.step(action)
+            #self.env_buffer.add_transition(obs, action, next_obs, reward, done, truncated)
+            self.env_buffer.add_transition(obs, action, next_obs, reward, done, truncated)
             obs = next_obs
             if done:
-                obs = self.train_env.reset()
+                obs, info = self.train_env.reset()
 
 
     def train(self):
@@ -91,11 +93,11 @@ class MBPOTrainer(BaseTrainer):
         
         model_rollout_steps = int(self.rollout_step_generator.initial_val)
         self.resize_model_buffer(model_rollout_steps)
-        obs = self.train_env.reset()
+        obs, info = self.train_env.reset()
         done = False
         
         util.logger.log_str("Started Training")
-
+ 
         for epoch in trange(self.max_epoch, colour='blue', desc='outer loop'): # if system is windows, add ascii=True to tqdm parameters to avoid powershell bugs
             
             epoch_start_time = time()
@@ -113,16 +115,17 @@ class MBPOTrainer(BaseTrainer):
                 log_infos = {}
 
                 action = self.agent.select_action(obs)['action']
-                next_obs, reward, done, _ = self.train_env.step(action)
+                #next_obs, reward, done, truncated, info = self.train_env.step(action)
+                next_obs, reward, done, truncated, info = self.train_env.step(action)
                 tot_env_steps += 1
                 traj_length  += 1
                 traj_return += reward
-                if traj_length >= self.max_trajectory_length:
+                if truncated or traj_length >= self.max_trajectory_length:
                     done = False
-                self.env_buffer.add_transition(obs, action, next_obs, reward, float(done))
+                self.env_buffer.add_transition(obs, action, next_obs, reward, done, truncated)
                 obs = next_obs
-                if done or traj_length >= self.max_trajectory_length:
-                    obs = self.train_env.reset()
+                if done or truncated or traj_length >= self.max_trajectory_length:
+                    obs, info = self.train_env.reset()
                     train_traj_returns.append(traj_return)
                     train_traj_lengths.append(traj_length)
                     traj_length = 0
