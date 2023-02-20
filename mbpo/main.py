@@ -13,6 +13,8 @@ from unstable_baselines.common.env_wrapper import get_env
 from unstable_baselines.model_based_rl.mbpo.transition_model import TransitionModel
 from unstable_baselines.common.scheduler import Scheduler
 from unstable_baselines.common import util
+from tqdm import tqdm
+from functools import partialmethod
 
 @click.command(context_settings=dict(
     ignore_unknown_options=True,
@@ -22,15 +24,20 @@ from unstable_baselines.common import util
 @click.option("--log-dir", default=os.path.join("logs","mbpo"))
 @click.option("--gpu", type=int, default=-1)
 @click.option("--print-log", type=bool, default=True)
+@click.option("--enable-pbar", type=bool, default=True)
 @click.option("--seed", type=int, default=30)
 @click.option("--info", type=str, default="")
 @click.option("--load-path", type=str, default="")
 @click.argument('args', nargs=-1)
-def main(config_path, log_dir, gpu, print_log, seed, info, load_path, args):
+def main(config_path, log_dir, gpu, print_log, enable_pbar, seed, info, load_path, args):
     print(os.getcwd())
     #todo: add load and update parameters function
     args = load_config(config_path, args)
 
+    #silence tqdm progress bar output
+    if not enable_pbar:
+        tqdm.__init__ = partialmethod(tqdm.__init__, disable=True)
+        
     #set global seed
     set_global_seed(seed)
 
