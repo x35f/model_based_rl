@@ -114,7 +114,7 @@ class MBPOTrainer(BaseTrainer):
                 self.pre_iter()
                 log_infos = {}
 
-                action = self.agent.select_action(obs)['action']
+                action = self.agent.select_action(obs)['action'][0]
                 #next_obs, reward, done, truncated, info = self.train_env.step(action)
                 next_obs, reward, done, truncated, info = self.train_env.step(action)
                 tot_env_steps += 1

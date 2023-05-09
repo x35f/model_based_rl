@@ -63,32 +63,28 @@ class MBPOAgent(BaseAgent):
 
 
     def update(self, data_batch):
-        obs_batch = data_batch['obs']
-        action_batch = data_batch['action'] 
-        next_obs_batch = data_batch['next_obs'] 
-        reward_batch = data_batch['reward']
-        done_batch = data_batch['done']
+        obs_batch, action_batch, reward_batch, next_obs_batch, done_batch, truncated_batch = \
+            itemgetter("obs", "action", "reward", "next_obs", "done", "truncated")(data_batch)
         
+       
         reward_batch = reward_batch * self.reward_scale
+        
+        #calculate critic loss
+        curr_q1 = self.q1_network([obs_batch, action_batch])
+        curr_q2 = self.q2_network([obs_batch, action_batch])
+        with torch.no_grad():
+            next_obs_action, next_obs_log_prob = \
+                itemgetter("action", "log_prob")(self.policy_network.sample(next_obs_batch))
 
-        curr_state_q1_value = self.q1_network(torch.cat([obs_batch, action_batch],dim=1))
-        curr_state_q2_value = self.q2_network(torch.cat([obs_batch, action_batch],dim=1))
-        next_state_action, next_state_log_pi = \
-            itemgetter("action_scaled", "log_prob")(self.policy_network.sample(next_obs_batch))
-
-        next_state_q1_value = self.target_q1_network(torch.cat([next_obs_batch, next_state_action], dim=1))
-        next_state_q2_value = self.target_q2_network(torch.cat([next_obs_batch, next_state_action], dim=1))
-        next_state_min_q = torch.min(next_state_q1_value, next_state_q2_value)
-        target_q = (next_state_min_q - self.alpha * next_state_log_pi)
-        target_q = reward_batch + self.gamma * (1. - done_batch) * target_q
+            target_q1_value = self.target_q1_network([next_obs_batch, next_obs_action])
+            target_q2_value = self.target_q2_network([next_obs_batch, next_obs_action])
+            next_obs_min_q = torch.min(target_q1_value, target_q2_value)
+            target_q = (next_obs_min_q - self.alpha * next_obs_log_prob)
+            target_q = reward_batch + self.gamma * (1. - done_batch) * target_q
 
         #compute q loss and backward
-        
-        q1_loss = F.mse_loss(curr_state_q1_value, target_q.detach())
-        q2_loss = F.mse_loss(curr_state_q2_value, target_q.detach())
-
-        q1_loss_value = q1_loss.detach().cpu().numpy()
-        q2_loss_value = q2_loss.detach().cpu().numpy()
+        q1_loss = F.mse_loss(curr_q1, target_q)
+        q2_loss = F.mse_loss(curr_q2, target_q)
 
         self.q1_optimizer.zero_grad()
         self.q2_optimizer.zero_grad()
@@ -98,19 +94,17 @@ class MBPOAgent(BaseAgent):
 
         ##########
 
-        new_curr_state_action, new_curr_state_log_pi = \
-            itemgetter("action_scaled", "log_prob")(self.policy_network.sample(obs_batch))
-        new_curr_state_q1_value = self.q1_network(torch.cat([obs_batch, new_curr_state_action],dim=1))
-        new_curr_state_q2_value = self.q2_network(torch.cat([obs_batch, new_curr_state_action],dim=1))
-        new_min_curr_state_q_value = torch.min(new_curr_state_q1_value, new_curr_state_q2_value)
-        
+        new_curr_obs_action, new_curr_obs_log_prob = \
+            itemgetter("action", "log_prob")(self.policy_network.sample(obs_batch))
+        new_curr_obs_q1_value = self.q1_network([obs_batch, new_curr_obs_action])
+        new_curr_obs_q2_value = self.q2_network([obs_batch, new_curr_obs_action])
+        new_min_curr_obs_q_value = torch.min(new_curr_obs_q1_value, new_curr_obs_q2_value)
+        #print(new_curr_obs_log_prob.shape, self.target_entropy, new_curr_obs_log_prob.mean())
         #compute policy and ent loss
-        policy_loss = ((self.alpha * new_curr_state_log_pi) - new_min_curr_state_q_value).mean()
-        policy_loss_value = policy_loss.item()
-
+        policy_loss = ((self.alpha * new_curr_obs_log_prob) - new_min_curr_obs_q_value).mean()
         if self.automatic_entropy_tuning:
-            alpha_loss = -(self.log_alpha * (new_curr_state_log_pi + self.target_entropy).detach()).mean()
-            alpha_loss_value = alpha_loss.item()
+            alpha_loss = -(self.log_alpha * (new_curr_obs_log_prob + self.target_entropy).detach()).mean()
+            alpha_loss_value = alpha_loss.detach().cpu().item()
             self.alpha_optim.zero_grad()
         else:
             alpha_loss = 0.
@@ -122,27 +116,24 @@ class MBPOAgent(BaseAgent):
         if self.automatic_entropy_tuning:
             self.alpha_optim.step()
             self.alpha = self.log_alpha.detach().exp()
-            alpha_value = self.alpha.cpu().numpy()
-        else:
-            alpha_value = self.alpha
 
         # backward and step
         self.tot_update_count += 1
 
-        self.try_update_target_network()
+        self.update_target_network()
         
         return {
-            "loss/q1": q1_loss_value, 
-            "loss/q2": q2_loss_value, 
-            "loss/policy": policy_loss_value, 
+            "loss/q1": q1_loss.item(), 
+            "loss/q2": q2_loss.item(), 
+            "loss/policy": policy_loss.item(), 
             "loss/entropy": alpha_loss_value, 
-            "misc/entropy_alpha": alpha_value, 
+            "misc/entropy_alpha": self.alpha.item(), 
             "misc/train_reward_mean": torch.mean(reward_batch).item(),
             "misc/train_reward_var": torch.var(reward_batch).item()
         }
         
 
-    def try_update_target_network(self):
+    def update_target_network(self):
         functional.soft_update_network(self.q1_network, self.target_q1_network, self.target_smoothing_tau)
         functional.soft_update_network(self.q2_network, self.target_q2_network, self.target_smoothing_tau)
 
@@ -155,17 +146,11 @@ class MBPOAgent(BaseAgent):
             obs = torch.FloatTensor(obs).to(util.device)
 
         action_scaled, log_prob = \
-                itemgetter("action_scaled", "log_prob")(self.policy_network.sample(obs, deterministic))
-        if obs.shape[0] == 1:
-            return {
-                "action": action_scaled.detach().cpu().numpy()[0], 
-                "log_prob": log_prob.detach().cpu().numpy()[0]
-            }
-        else:
-            return {
-                "action": action_scaled.detach().cpu().numpy(), 
-                "log_prob": log_prob.detach().cpu().numpy()
-            }
+                itemgetter("action", "log_prob")(self.policy_network.sample(obs, deterministic))
+        return {
+            "action": action_scaled.detach().cpu().numpy(), 
+            "log_prob": log_prob.detach().cpu().numpy()[0]
+        }
 
 
     

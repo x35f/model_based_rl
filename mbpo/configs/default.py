@@ -21,11 +21,11 @@ default_args = {
     "policy_network":{
       "network_params": [("mlp", 256), ("mlp", 256)],
       "optimizer_class": "Adam",
-      "deterministic": False,
       "learning_rate":0.0003,
       "act_fn": "relu",
       "out_act_fn": "identity",
-      "re_parameterize": True
+      "re_parameterize": True,
+      "stablize_log_prob": True
     },
     "entropy":{
       "automatic_tuning": True,
@@ -43,7 +43,7 @@ default_args = {
     "holdout_ratio": 0.2,
     "inc_var_loss": True,
     "model":{
-      "hidden_dims": [200, 200, 200, 200],
+      "network_params": [("mlp", 200), ("mlp", 200), ("mlp", 200), ("mlp", 200)],
       "decay_weights": [0.000025, 0.00005, 0.000075, 0.000075, 0.0001],
       "act_fn": "swish",
       "out_act_fn": "identity",
